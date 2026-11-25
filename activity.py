@@ -34,6 +34,9 @@ class Activity:
     keyboard: float = -math.inf
     mouse: float = -math.inf
     click: float = -math.inf
+    scroll: float = -math.inf
+    scroll_x: float = 0.0
+    scroll_y: float = 0.0
     key_interval: float = .33
     # Real pointer displacement since the previous snapshot, in screen pixels.
     motion_x: float = 0.0
@@ -68,6 +71,7 @@ class ActivityMonitor:
         self._latest = KeyHint()
         self._last_press = -math.inf
         self._motion = [0.0, 0.0]
+        self._wheel = [0.0, 0.0]
 
     def set_enabled(self, enabled):
         if enabled == self.enabled:
@@ -218,8 +222,15 @@ class ActivityMonitor:
             self.pointer_click()
 
     def _scroll(self, x, y, dx, dy):
-        del x, y, dx, dy
-        self.pointer_click()
+        del x, y
+        self.pointer_scrolled(dx, dy)
+
+    def pointer_scrolled(self, dx, dy):
+        with self._lock:
+            if self.enabled and (dx or dy):
+                self._activity = replace(self._activity, scroll=time.monotonic())
+                self._wheel[0] = max(-8, min(8, self._wheel[0] + dx))
+                self._wheel[1] = max(-8, min(8, self._wheel[1] + dy))
 
     def pointer_moved(self, x, y, local=False):
         with self._lock:
@@ -280,8 +291,10 @@ class ActivityMonitor:
                 self._latest = KeyHint()
             result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key),
                            pulses=frozenset(self._pulses), hints=tuple(self._hints), latest=self._latest,
-                           any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1])
+                           any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1],
+                           scroll_x=self._wheel[0], scroll_y=self._wheel[1])
             self._motion[:] = (0.0, 0.0)
+            self._wheel[:] = (0.0, 0.0)
             return result
 
     def _stop_listeners(self):
@@ -308,4 +321,5 @@ class ActivityMonitor:
             self._global_position = self._local_position = None
             self._last_press = -math.inf
             self._motion[:] = (0.0, 0.0)
+            self._wheel[:] = (0.0, 0.0)
         self._stop_listeners()

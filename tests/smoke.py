@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
 from animations import Animations, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
-from keyboard_layout import BY_ID, KEYS
+from keyboard_layout import BY_ID, BY_SCAN, KEYS, LABELS, key_for_symbol
 from main import instance_busy
 from pet import PetWindow, visible_position
 
@@ -88,6 +88,18 @@ def check_motion_and_screens() -> None:
     assert visible_position(QPoint(-1800, 300), QSize(200, 200), areas) == QPoint(-1800, 300)
     assert len({key.identifier for key in KEYS}) == len(KEYS)
     assert len({key.scan for key in KEYS}) == len(KEYS)
+    assert len(KEYS) == 105
+    for identifier in ('F1', 'F12', 'PrintScreen', 'ScrollLock', 'Pause', 'NumLock',
+                       'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown',
+                       'NumpadEnter', 'Numpad0', 'Numpad9', 'MetaRight', 'CtrlRight'):
+        assert BY_SCAN[BY_ID[identifier].scan] == identifier
+    assert BY_ID['NumpadEnter'].scan != BY_ID['Enter'].scan
+    assert BY_ID['Numpad1'].scan != BY_ID['Digit1'].scan
+    assert key_for_symbol(0xff9c) == 'Numpad1'  # Num Lock off: KP_End, not End.
+    assert key_for_symbol(0xffb1) == 'Numpad1'
+    assert key_for_symbol(0xff8d) == 'NumpadEnter'
+    assert LABELS['latam']['Semicolon'] == 'Ñ'
+    assert BY_ID['Numpad0'].contact[0] < BY_ID['ArrowDown'].contact[0]
     assert BY_ID['P'].contact[0] < BY_ID['A'].contact[0]
     assert BY_ID['Space'].contact[1] < BY_ID['Digit1'].contact[1]
     assert BY_ID['P'].preferred_paw == 0 and BY_ID['A'].preferred_paw == 1
@@ -174,6 +186,18 @@ def check_motion_and_screens() -> None:
     monitor.pointer_click()
     assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
     assert monitor.snapshot().motion_x == 0
+    monitor.pointer_scrolled(0, 1)
+    state = monitor.snapshot()
+    assert state.scroll > 0 and state.scroll_y == 1 and state.mouse == movement
+    assert monitor.snapshot().scroll_y == 0
+    scroll = Animations()
+    for frame in range(24):
+        now_scroll = frame / 30
+        pose_scroll = scroll.advance(1 / 30, now_scroll, Activity(scroll=now_scroll, scroll_y=1,
+                       keyboard=now_scroll, held=frozenset({'P'}), latest=KeyHint('P', 0)))
+    assert pose_scroll.mouse > .95 and pose_scroll.right_key == 'P'
+    assert pose_scroll.mouse_dx == 0 and pose_scroll.mouse_dy == 0
+    assert abs(pose_scroll.left_x - MOUSE_REST[0]) < .1
     monitor.key_down('W', server_time=100)
     initial = monitor.snapshot().latest
     monitor.key_up(BY_ID['W'].scan, server_time=200)

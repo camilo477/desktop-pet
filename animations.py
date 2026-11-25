@@ -9,7 +9,7 @@ from keyboard_layout import BY_ID
 
 LEFT_REST = (91.0, 148.0)
 RIGHT_REST = (115.0, 148.0)
-MOUSE_REST = (40.0, 161.0)
+MOUSE_REST = (21.0, 162.0)
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
@@ -70,6 +70,8 @@ class Pose:
     mouse_dx: float = 0.0
     mouse_dy: float = 0.0
     click: float = 0.0
+    scroll: float = 0.0
+    scroll_direction: float = 0.0
     sleep: float = 0.0
     relax: float = 0.0
     zzz: float = 0.0
@@ -284,7 +286,7 @@ class Animations:
 
     def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0)):
         pose = self.pose
-        observed = max(activity.keyboard, activity.mouse, activity.click)
+        observed = max(activity.keyboard, activity.mouse, activity.click, activity.scroll)
         if self.last_activity is None:
             self.last_activity = now
         active = activity.any_held or bool(activity.held) or observed > self.last_activity or self.touch_pending
@@ -314,12 +316,17 @@ class Animations:
             self.head_velocity[:] = (0.0, 0.0, 0.0)
             pose.pressed = frozenset()
             return pose
-        mouse_active = now - activity.mouse < MOUSE_HOLD
+        mouse_active = now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 8, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 9, dt)
         self._mouse_motion(dt, activity, mouse_active)
         age = now - activity.click
         pose.click = math.sin(math.pi * age / .18) if 0 <= age < .18 else 0
+        if activity.scroll_x or activity.scroll_y:
+            pose.scroll_direction = math.copysign(1, activity.scroll_y or activity.scroll_x)
+            pose.scroll = min(1, pose.scroll + abs(activity.scroll_y or activity.scroll_x) * .4)
+        else:
+            pose.scroll = approach(pose.scroll, 0, 9, dt)
         pose.pressed = activity.pressed
         self._assign(now, activity, mouse_active)
         for index, paw in enumerate(self.paws):
@@ -360,7 +367,9 @@ class Animations:
             for axis in (0, 1):
                 self.focus_point[axis] = approach(self.focus_point[axis], target[axis], mix(12, 5, tempo), dt)
         pose.focus = approach(pose.focus, (0.2 if mouse_active else 1) if key_point else 0, 9, dt)
-        if now - activity.mouse < .65:
+        if now - activity.scroll < .5 and activity.scroll > activity.mouse:
+            look = (-.75, .7)
+        elif now - activity.mouse < .65:
             look = gaze
             if key_point and activity.held:
                 look = (gaze[0] * .88 + (self.focus_point[0] - 105) / 55 * .12, gaze[1] * .88 + .08)

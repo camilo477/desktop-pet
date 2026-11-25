@@ -113,8 +113,8 @@ class CatArt:
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#829294' if down else '#ccd2ce'))
         p.drawPath(self.key_paths[key.identifier])
         label = LABELS.get(self.layout, {}).get(key.identifier, key.label)
-        if scale >= .99 and label:
-            font = QFont('sans-serif'); font.setPixelSize(4)
+        if scale >= 1.4 and label:
+            font = QFont('sans-serif'); font.setPixelSize(3)
             p.setFont(font); p.setPen(QColor('#39454b'))
             x, y, ux, uy, vx, vy = key.label_basis
             p.setTransform(QTransform(ux, uy, vx, vy, x, y), True)
@@ -329,6 +329,11 @@ class CatArt:
             if key.identifier in pose.pressed:
                 self.draw_key(p, key, True, self.cache_scale)
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse'); p.restore()
+        if pose.scroll > .01:
+            p.setPen(QPen(QColor('#586970'), 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            x, y = 21 + pose.mouse_dx, 162 + pose.mouse_dy
+            step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
+            p.drawLine(QPointF(x - 1, y + 3 + step), QPointF(x, y + 5 + step))
         washing_face = pose.action == 'wash' and pose.groom > .01
         if pose.sleep < .995:
             if not washing_face:

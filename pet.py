@@ -229,6 +229,15 @@ class PetWindow(QWidget):
         if self.dragging and not self.system_drag:
             self.move(self.press_origin + delta)
 
+    def wheelEvent(self, event) -> None:
+        if not (self.global_input and len(self.activity._listeners) > 1
+                and self.activity._listeners[1].is_alive()):
+            delta = event.angleDelta()
+            pixels = event.pixelDelta()
+            self.activity.pointer_scrolled(delta.x() / 120 or pixels.x() / 20,
+                                           delta.y() / 120 or pixels.y() / 20)
+        event.accept()
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.press_position is not None:
             if not self.dragging and not self.paused:
