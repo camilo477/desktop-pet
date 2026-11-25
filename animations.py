@@ -7,9 +7,10 @@ import random
 from activity import Activity, KeyHint
 from keyboard_layout import BY_ID
 
-LEFT_REST = (84.0, 145.0)
-RIGHT_REST = (110.0, 146.0)
-MOUSE_REST = (161.0, 161.0)
+LEFT_REST = (91.0, 148.0)
+RIGHT_REST = (115.0, 148.0)
+MOUSE_REST = (34.0, 161.0)
+MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
 RELAX_AFTER = 60.0
@@ -169,7 +170,7 @@ class Animations:
         self.next_idle = self.time + self.action_duration + random.uniform(*IDLE_ACTION_GAP)
 
     def _assign(self, now, activity, mouse):
-        available = [0] if mouse else [0, 1]
+        available = [1 - MOUSE_PAW] if mouse else [0, 1]
         for index, paw in enumerate(self.paws):
             if index not in available or (paw.key not in activity.held and now > paw.until):
                 paw.key = None
@@ -179,7 +180,7 @@ class Animations:
             key = BY_ID[hint.identifier]
             existing = next((i for i in available if self.paws[i].key == key.identifier), None)
             if existing is None:
-                preferred = 0 if key.contact[0] < 82 else 1
+                preferred = key.preferred_paw
                 def score(index):
                     paw = self.paws[index]
                     held = paw.key in activity.held
@@ -292,7 +293,7 @@ class Animations:
                     stroke = (phase * 2.2) % 1
                     target = (86 + math.sin(stroke * math.pi) * 3, 91 - math.sin(stroke * math.pi) * 23)
                 paw.aim('groom', target)
-            elif index == 1 and mouse_active:
+            elif index == MOUSE_PAW and mouse_active:
                 paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .5))
             elif paw.key in BY_ID:
                 point = BY_ID[paw.key].contact
@@ -308,9 +309,9 @@ class Animations:
         if now - activity.mouse < .65:
             look = gaze
             if key_point and activity.held:
-                look = (gaze[0] * .88 + (key_point[0] - 90) / 70 * .12, gaze[1] * .88 + .08)
+                look = (gaze[0] * .88 + (key_point[0] - 105) / 60 * .12, gaze[1] * .88 + .08)
         elif key_point:
-            look = ((key_point[0] - 90) / 70, .7)
+            look = ((key_point[0] - 105) / 60, .7)
         elif playing and self.action_kind == 'look':
             look = (self.look_side * .55 * action, -.05)
         elif pose.groom > .02:
@@ -326,13 +327,13 @@ class Animations:
         pose.head_x = approach(pose.head_x, pose.gaze_x, 4, dt)
         pose.head_y = approach(pose.head_y, pose.gaze_y, 3.5, dt)
         if key_point:
-            target_x = max(-10, min(9, (key_point[0] - 95) * .19))
+            target_x = max(-10, min(9, (key_point[0] - 105) * .19))
             target_y = max(0, min(9, (key_point[1] - 146) * .38))
             if mouse_active:
-                target_x = target_x * .45 + 4.5
+                target_x = target_x * .45 - 4.5
                 target_y = max(5, target_y)
         else:
-            target_x, target_y = (7.5, 4) if mouse_active else (0, 0)
+            target_x, target_y = (-7.5, 4) if mouse_active else (0, 0)
         if playing and self.action_kind == 'shift':
             target_x += self.look_side * action * 2
         if pose.groom > 0:

@@ -8,6 +8,8 @@ activity in a transparent window without taking keyboard focus.
 
 - Minimal flat silhouettes, a seated feline posture and organically bending forelegs.
 - A QWERTY keyboard whose key shapes also define the paws' contact targets.
+- Peripherals face the cat: the space bar is nearest its paws and its right-hand
+  mouse appears on the viewer's left.
 - Actual key presses, holds and releases on X11, including simultaneous keys.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Coordinated eyes, head, torso, ears and flexible tail, at up to 30 FPS.

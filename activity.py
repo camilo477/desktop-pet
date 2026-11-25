@@ -188,7 +188,7 @@ class ActivityMonitor:
             if identifier is not None:
                 self._pulses[identifier] = now + PULSE_SECONDS
                 hint = KeyHint(identifier, now)
-                sector = 0 if BY_ID[identifier].contact[0] < 82 else 1
+                sector = BY_ID[identifier].preferred_paw
                 self._hints[sector] = hint
                 self._latest = hint
 

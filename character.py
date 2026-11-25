@@ -6,7 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
 from animations import Pose, mix, smoothstep
@@ -109,7 +109,9 @@ class CatArt:
         if scale >= .99 and label:
             font = QFont('sans-serif'); font.setPixelSize(4)
             p.setFont(font); p.setPen(QColor('#39454b'))
-            bounds = self.key_paths[key.identifier].boundingRect()
+            x, y, ux, uy, vx, vy = key.label_basis
+            p.setTransform(QTransform(ux, uy, vx, vy, x, y), True)
+            bounds = QRectF(-key.width * 2.5 + .3, -2.5, key.width * 5 - .6, 5)
             metrics = QFontMetricsF(font)
             if metrics.horizontalAdvance(label) < bounds.width() - .4:
                 p.drawText(bounds, Qt.AlignmentFlag.AlignCenter, label)
@@ -291,6 +293,6 @@ class CatArt:
             self._arm(p, pose, -1)
         for side in (-1, 1):
             x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
-            p.save(); p.translate(x, y); p.rotate(-pose.mouse * 12 if side > 0 else 0)
+            p.save(); p.translate(x, y); p.rotate(pose.mouse * 12 if side < 0 else 0)
             self.layer(p, 'paw'); p.restore()
         self._zzz(p, pose); p.restore()

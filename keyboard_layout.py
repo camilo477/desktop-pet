@@ -14,7 +14,9 @@ class Key:
 
     @staticmethod
     def project(u: float, v: float) -> tuple[float, float]:
-        return 36 - v * 1.5 + u * (5.6 + v * .20), 153 + v * 6 + u * .08
+        # Rotate the keyboard on its own plane before applying floor perspective.
+        u, v = 18.45 - u, 4.95 - v
+        return 64 - v * 1.2 + u * (4.9 + v * .16), 151 + v * 6 + u * .035
 
     @property
     def contact(self) -> tuple[float, float]:
@@ -25,6 +27,18 @@ class Key:
         u, v, w = self.column + .07, self.row + .07, self.width - .14
         return (self.project(u, v), self.project(u + w, v),
                 self.project(u + w, v + .82), self.project(u, v + .82))
+
+    @property
+    def label_basis(self):
+        u, v = self.column + self.width * .5, self.row + .53
+        x, y = self.project(u, v)
+        ux, uy = self.project(u + 1, v)
+        vx, vy = self.project(u, v + 1)
+        return x, y, (ux - x) / 5, (uy - y) / 5, (vx - x) / 6, (vy - y) / 6
+
+    @property
+    def preferred_paw(self):
+        return 0 if self.contact[0] < KEYBOARD_CENTER[0] else 1
 
     @property
     def modifier(self) -> bool:
@@ -65,6 +79,7 @@ def _definitions() -> tuple[Key, ...]:
 KEYS = _definitions()
 BY_ID = {key.identifier: key for key in KEYS}
 BY_SCAN = {key.scan: key.identifier for key in KEYS}
+KEYBOARD_CENTER = Key.project(7.5, 2.5)
 BOARD = tuple(Key.project(u, v) for u, v in ((-.25, -.2), (18.7, -.2), (18.7, 5.15), (-.25, 5.15)))
 SPECIAL_SYMBOLS = {0xff1b: "Escape", 0xff08: "Backspace", 0xff09: "Tab", 0xff0d: "Enter",
                    0xffe1: "ShiftLeft", 0xffe2: "ShiftRight", 0xffe3: "CtrlLeft", 0xffe4: "CtrlRight",

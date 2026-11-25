@@ -77,6 +77,9 @@ def check_motion_and_screens() -> None:
     assert visible_position(QPoint(-1800, 300), QSize(200, 200), areas) == QPoint(-1800, 300)
     assert len({key.identifier for key in KEYS}) == len(KEYS)
     assert len({key.scan for key in KEYS}) == len(KEYS)
+    assert BY_ID['P'].contact[0] < BY_ID['A'].contact[0]
+    assert BY_ID['Space'].contact[1] < BY_ID['Digit1'].contact[1]
+    assert BY_ID['P'].preferred_paw == 0 and BY_ID['A'].preferred_paw == 1
     animation = Animations()
     now = 0.0
 
@@ -90,15 +93,15 @@ def check_motion_and_screens() -> None:
     # A ten-second hold stays planted; autorepeat adds no motion goals.
     hold = Activity(keyboard=0, held=frozenset({'W'}), latest=KeyHint('W', 0))
     pose = advance(10, hold)
-    assert pose.left_key == 'W' and 'W' in pose.pressed
-    assert abs(pose.left_x - BY_ID['W'].contact[0]) < .1
-    assert abs(pose.left_y - BY_ID['W'].contact[1] - .55) < .1
+    assert pose.right_key == 'W' and 'W' in pose.pressed
+    assert abs(pose.right_x - BY_ID['W'].contact[0]) < .1
+    assert abs(pose.right_y - BY_ID['W'].contact[1] - .55) < .1
     assert animation.last_activity == now and pose.sleep == 0
     now += SLEEP_AFTER + 1
     pose = animation.advance(1 / 30, now, hold)
-    assert animation.last_activity == now and pose.sleep == 0 and pose.left_key == 'W'
+    assert animation.last_activity == now and pose.sleep == 0 and pose.right_key == 'W'
     pose = advance(1)
-    assert not pose.pressed and abs(pose.left_y - LEFT_REST[1]) < .1
+    assert not pose.pressed and abs(pose.right_y - RIGHT_REST[1]) < .1
 
     # Hand allocation follows location and preserves a held key where possible.
     chord = Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}),
@@ -109,14 +112,14 @@ def check_motion_and_screens() -> None:
     pose = advance(1, Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}), mouse=now))
     # Only actual motion reserves the mouse paw; the other can reach P.
     pose = advance(.4, Activity(keyboard=now, mouse=now, held=frozenset({'P'}), latest=KeyHint('P', now)), (1, -1))
-    assert pose.left_key == 'P' and pose.right_key is None
-    assert pose.right_x > 150 and pose.left_x > 85
+    assert pose.right_key == 'P' and pose.left_key is None
+    assert pose.left_x < 45 and pose.right_x > 95
     assert -1 <= pose.gaze_x <= 1 and -1 <= pose.gaze_y <= 1
     pose = advance(1.4)
-    assert pose.mouse < .01 and abs(pose.right_x - RIGHT_REST[0]) < .1
+    assert pose.mouse < .01 and abs(pose.left_x - LEFT_REST[0]) < .1
     assert abs(pose.head_x) < .1  # Attention leaves a stationary cursor.
     pose = advance(.3, Activity(click=now))
-    assert pose.mouse == 0 and abs(pose.right_x - RIGHT_REST[0]) < .1
+    assert pose.mouse == 0 and abs(pose.left_x - LEFT_REST[0]) < .1
 
     # A brief Space survives between frames without a queued text sequence.
     pose = advance(.25, Activity(keyboard=now, pulses=frozenset({'Space'}), latest=KeyHint('Space', now)))
