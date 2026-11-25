@@ -56,7 +56,8 @@ class ActivityMonitor:
             ]
             for listener in self._listeners:
                 listener.start()
-        except (ImportError, OSError, RuntimeError):
+        except Exception:
+            # An unavailable input backend must not prevent the pet from running.
             self._stop_listeners()
 
     def _keyboard(self, key) -> None:
@@ -100,13 +101,13 @@ class ActivityMonitor:
         for listener in listeners:
             try:
                 listener.stop()
-            except (OSError, RuntimeError):
+            except Exception:
                 pass
         for listener in listeners:
             if listener.ident is not None:
                 try:
                     listener.join(timeout=0.4)
-                except (OSError, RuntimeError):
+                except Exception:
                     pass
 
     def stop(self) -> None:

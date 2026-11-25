@@ -1,5 +1,6 @@
 """Essential checks: run with .venv/bin/python tests/smoke.py."""
 
+import fcntl
 import os
 from pathlib import Path
 import sys
@@ -9,15 +10,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRect, QSettings, QSize, Qt
+from PySide6.QtGui import QCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from activity import Activity
 from animations import Animations
+from main import instance_busy
 from pet import PetWindow, visible_position
 
 
 def check_window() -> None:
+    cursor = QCursor.pos()
     pet = PetWindow()
     pet.show()
     QTest.qWait(120)
@@ -59,6 +63,7 @@ def check_window() -> None:
     restored.shutdown()
     pet.close()
     restored.close()
+    QCursor.setPos(cursor)
 
 
 def check_motion_and_screens() -> None:
@@ -77,6 +82,16 @@ def check_motion_and_screens() -> None:
     assert animation.advance(0.14).blink > 0.9
 
 
+def check_instance_lock() -> None:
+    with TemporaryDirectory(prefix="desktop-pet-lock-") as directory:
+        path = Path(directory)
+        assert not instance_busy(path)
+        with (path / "instance.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert instance_busy(path)
+        assert not instance_busy(path)
+
+
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="desktop-pet-checks-") as directory:
         QCoreApplication.setOrganizationName("desktop-pet-checks")
@@ -86,4 +101,5 @@ if __name__ == "__main__":
         app = QApplication([])
         check_window()
         check_motion_and_screens()
-    print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, animations and screen bounds.")
+        check_instance_lock()
+    print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, animations, screens and lock.")

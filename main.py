@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 from PySide6.QtCore import QCoreApplication, QIODevice, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -61,6 +62,21 @@ def request(server_name: str, command: bytes) -> bytes | None:
     return reply
 
 
+def instance_busy(directory: Path) -> bool:
+    try:
+        fd = os.open(directory / "instance.lock", os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+    finally:
+        os.close(fd)
+
+
 def notify(fd: int | None, message: str) -> None:
     if fd is not None:
         try:
@@ -95,10 +111,10 @@ def serve(directory: Path, ready_fd: int | None) -> int:
         server = QLocalServer(app)
         server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
         server.setMaxPendingConnections(4)
-        if not server.listen(server_name):
-            raise RuntimeError("No se pudo abrir el canal de control local.")
         pet = PetWindow()
         app.aboutToQuit.connect(pet.shutdown)
+        if not server.listen(server_name):
+            raise RuntimeError("No se pudo abrir el canal de control local.")
 
         def accept_connections() -> None:
             while server.hasPendingConnections():
@@ -201,7 +217,15 @@ def main() -> int:
             return serve(directory, args.ready_fd)
         app = QCoreApplication([sys.argv[0]])
         if args.command == "off":
-            reply = request(str(directory / "control.sock"), b"off")
+            server_name = str(directory / "control.sock")
+            deadline = time.monotonic() + 8.0
+            reply = request(server_name, b"off")
+            # The GUI may own the lock while it is still preparing its window.
+            while reply is None and instance_busy(directory):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("La mascota sigue iniciándose; no ha podido recibir la orden de cierre.")
+                time.sleep(0.05)
+                reply = request(server_name, b"off")
             print("Mascota cerrada." if reply is not None else "La mascota no está en ejecución.")
             return 0
         return launch(directory)

@@ -4,6 +4,8 @@ An original little ginger cat at a wooden desk, built for Linux with Python,
 PySide6 and SVG. The transparent window stays above other windows without
 taking keyboard focus. Miga breathes, blinks and occasionally flicks its tail.
 
+![Miga at a wooden desk](assets/cat/miga.svg)
+
 ## Features
 
 - Original layered SVG artwork, with smooth independent animations at up to 30 FPS.

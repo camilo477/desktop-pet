@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPainterPath, QPixmap, QRegion
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
@@ -45,7 +45,7 @@ class CatArt:
         self.renderer = QSvgRenderer(str(path))
         if not self.renderer.isValid():
             raise RuntimeError("Could not load the character artwork.")
-        self.layers: dict[str, QPixmap] = {}
+        self.layers: dict[str, tuple[QPointF, QPixmap]] = {}
         self.cache_scale = 0.0
         self.eye_clip = QPainterPath()
         self.eye_clip.addEllipse(QRectF(69.5, 79.6, 16.0, 18.6))
@@ -60,19 +60,27 @@ class CatArt:
         for name in self.LAYERS:
             if not self.renderer.elementExists(name):
                 raise RuntimeError(f"Missing character layer: {name}")
-            pixmap = QPixmap(pixels, pixels)
+            bounds = self.renderer.boundsOnElement(name)
+            left_px = math.floor((bounds.left() - 2) * scale)
+            top_px = math.floor((bounds.top() - 2) * scale)
+            width = math.ceil((bounds.right() + 2) * scale) - left_px
+            height = math.ceil((bounds.bottom() + 2) * scale) - top_px
+            origin = QPointF(left_px / scale, top_px / scale)
+            pixmap = QPixmap(width, height)
             pixmap.fill(Qt.GlobalColor.transparent)
             painter = QPainter(pixmap)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.scale(scale, scale)
-            self.renderer.render(painter, name, self.renderer.boundsOnElement(name))
+            painter.translate(-origin.x(), -origin.y())
+            self.renderer.render(painter, name, bounds)
             painter.end()
             pixmap.setDevicePixelRatio(scale)
-            self.layers[name] = pixmap
+            self.layers[name] = (origin, pixmap)
 
     def draw(self, painter: QPainter, pose: Pose) -> None:
         def layer(name: str) -> None:
-            painter.drawPixmap(0, 0, self.layers[name])
+            position, pixmap = self.layers[name]
+            painter.drawPixmap(position, pixmap)
 
         painter.save()
         painter.setRenderHints(
