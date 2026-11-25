@@ -3,7 +3,7 @@
 import math
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
@@ -33,6 +33,8 @@ def visible_position(position: QPoint, size: QSize, areas: list[QRect]) -> QPoin
 
 
 class PetWindow(QWidget):
+    activity_ready = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.settings = QSettings()
@@ -47,7 +49,8 @@ class PetWindow(QWidget):
         self.mask_supported = platform == "xcb" or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.global_input = supports_global_input(platform)
-        self.activity = ActivityMonitor(self.global_input)
+        self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit)
+        self.activity_ready.connect(self.input_arrived, Qt.ConnectionType.QueuedConnection)
         self.local_gaze = (0.0, 0.0)
         self._closed = False
         self.setWindowTitle("Miga")
@@ -136,8 +139,9 @@ class PetWindow(QWidget):
                 screen = self.screen() or QApplication.primaryScreen()
                 if screen:
                     area = screen.geometry()
-                    gaze = (math.tanh((cursor.x() - self.width() * 0.505) / max(1, area.width() * 0.28)),
-                            math.tanh((cursor.y() - self.height() * 0.38) / max(1, area.height() * 0.30)))
+                    head = self.art.head_position * (self.width() / 200)
+                    gaze = (math.tanh((cursor.x() - head.x()) / max(1, area.width() * 0.28)),
+                            math.tanh((cursor.y() - head.y()) / max(1, area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
         self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze)
@@ -146,6 +150,15 @@ class PetWindow(QWidget):
             self.timer.setInterval(interval)
         self.last_frame = now
         self.render_frame()
+
+    def input_arrived(self) -> None:
+        if self._closed or self.paused or not self.reactions:
+            return
+        if time.monotonic() - self.last_frame >= 1 / 30:
+            self.tick()
+            self.timer.start(34)
+        elif self.timer.interval() > 34:
+            self.timer.start(34)
 
     def render_frame(self, force_mask: bool = False) -> None:
         ratio = self.devicePixelRatioF()
@@ -170,6 +183,7 @@ class PetWindow(QWidget):
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
                      round(pose.tail * math.cos(pose.tail_phase) * 20),
                      round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
+                     round(pose.contact * 15), round(pose.mouse_dx * 2), round(pose.mouse_dy * 2),
                      round(pose.groom * 20), round(pose.yawn * 20))
         if handle and (force_mask or signature != self.mask_signature or now - self.mask_time >= 0.1):
             # Native masks use logical pixels; keep antialiased edges inside the mask.
@@ -217,8 +231,8 @@ class PetWindow(QWidget):
         position = event.globalPosition()
         self.activity.pointer_moved(position.x(), position.y(), local=True)
         if self.reactions and not self.paused:
-            self.local_gaze = ((event.position().x() / self.width() - 0.505) * 2.0,
-                               (event.position().y() / self.height() - 0.38) * 2.0)
+            offset = event.position() * (200 / self.width()) - self.art.head_position
+            self.local_gaze = (offset.x() / 100, offset.y() / 100)
         if self.press_position is None:
             return
         delta = event.globalPosition().toPoint() - self.press_position
@@ -230,8 +244,7 @@ class PetWindow(QWidget):
             self.move(self.press_origin + delta)
 
     def wheelEvent(self, event) -> None:
-        if not (self.global_input and len(self.activity._listeners) > 1
-                and self.activity._listeners[1].is_alive()):
+        if not self.activity.global_pointer_active:
             delta = event.angleDelta()
             pixels = event.pixelDelta()
             self.activity.pointer_scrolled(delta.x() / 120 or pixels.x() / 20,

@@ -17,7 +17,7 @@ class Key:
     def project(u: float, v: float) -> tuple[float, float]:
         # A half-turn on the floor plane: this is the cat's keyboard.
         u, v = 23.0 - u, 5.0 - v
-        return 43 - v * .50 + u * (5.7 + v * .06), 150 + v * 4.6 + u * .025
+        return 43 - v * .50 + u * (5.7 + v * .06), 160 + v * 4.6 + u * .025
 
     @property
     def contact(self) -> tuple[float, float]:

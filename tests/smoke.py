@@ -1,6 +1,7 @@
 """Essential checks: run with .venv/bin/python tests/smoke.py."""
 
 import fcntl
+import math
 import os
 from pathlib import Path
 import sys
@@ -10,15 +11,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRect, QSettings, QSize, Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
-from animations import Animations, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
+from animations import Animations, Pose, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
 from keyboard_layout import BY_ID, BY_SCAN, KEYS, LABELS, key_for_symbol
 from main import instance_busy
 from pet import PetWindow, visible_position
+from anatomy import BodyGeometry, FaceGeometry, MAX_REACH
+from character import CatArt
 
 
 def check_window() -> None:
@@ -120,7 +123,7 @@ def check_motion_and_screens() -> None:
     pose = advance(10, hold)
     assert pose.right_key == 'W' and 'W' in pose.pressed
     assert abs(pose.right_x - BY_ID['W'].contact[0]) < .1
-    assert abs(pose.right_y - BY_ID['W'].contact[1] - .55) < .1
+    assert abs(pose.right_y - BY_ID['W'].contact[1] - .35) < .1
     assert animation.last_activity == now and pose.sleep == 0
     now += SLEEP_AFTER + 1
     pose = animation.advance(1 / 30, now, hold)
@@ -262,6 +265,65 @@ def check_responsiveness() -> None:
             assert pose.left_key is None and pose.right_key is None and not pose.pressed
 
 
+def check_geometry_and_contacts() -> None:
+    art = CatArt(); art.cache(200, 1)
+
+    def mouse_centroid(pose):
+        image = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image); art.draw(painter, pose); painter.end()
+        color = QColor('#a9b4b6').rgba()
+        points = [(x, y) for y in range(140, 185) for x in range(45) if image.pixel(x, y) == color]
+        assert points
+        return tuple(sum(p[i] for p in points) / len(points) for i in (0, 1))
+
+    origin = mouse_centroid(Pose())
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+        animation = Animations()
+        for frame in range(45):
+            now = frame / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now, motion_x=dx * 8, motion_y=dy * 8))
+            if animation.mouse_contact:
+                assert math.dist((pose.left_x, pose.left_y), (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy)) < .01
+        # Test the final painted object, including the SVG and painter transforms.
+        moved = mouse_centroid(Pose(mouse_dx=pose.mouse_dx, mouse_dy=pose.mouse_dy))
+        for i, direction in enumerate((dx, dy)):
+            if direction:
+                assert (moved[i] - origin[i]) * direction > 4
+            else:
+                assert abs(moved[i] - origin[i]) < .2
+
+    for key in KEYS:
+        animation = Animations()
+        for frame in range(30):
+            pose = animation.advance(1 / 30, frame / 30, Activity(held=frozenset({key.identifier}), latest=KeyHint(key.identifier, 0)))
+        paw = next(paw for paw in animation.paws if paw.key == key.identifier)
+        assert paw.landed, key.identifier
+        assert math.dist((paw.x, paw.y), (key.contact[0], key.contact[1] + .35)) < 1.05
+        assert pose.contact < .01  # Holding does not repeatedly create impacts.
+        assert BodyGeometry(pose).hips == (104, 153)
+
+    animation = Animations()
+    animation.last_activity = 0
+    animation.start_idle('lick')
+    for frame in range(60):
+        now = 25 + frame / 30
+        pose = animation.advance(1 / 30, now)
+        if pose.groom > .5:
+            target = FaceGeometry(pose).grooming_target('lick', (animation.time - animation.action_start) / animation.action_duration)
+            assert math.dist((pose.left_x, pose.left_y), target) < 2
+    # Sleep is interrupted by wheel activity even without cursor movement.
+    pose = animation.advance(.1, 240)
+    for frame in range(60):pose = animation.advance(.1, 240 + frame / 10)
+    assert animation.sleeping
+    for frame in range(20):
+        now = 247 + frame / 30
+        pose = animation.advance(1 / 30, now, Activity(scroll=now, scroll_y=1))
+    assert pose.sleep < .03 and pose.mouse > .9 and pose.mouse_dx == pose.mouse_dy == 0
+    for side, point in ((-1, (pose.left_x, pose.left_y)), (1, (pose.right_x, pose.right_y))):
+        assert math.dist(BodyGeometry(pose).shoulder(side), point) <= MAX_REACH + .1
+
+
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="desktop-pet-checks-") as directory:
         QCoreApplication.setOrganizationName("desktop-pet-checks")
@@ -272,5 +334,6 @@ if __name__ == "__main__":
         check_window()
         check_motion_and_screens()
         check_responsiveness()
+        check_geometry_and_contacts()
         check_instance_lock()
-    print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, per-key input, holds, shared paws, grooming, sleep, screens and lock.")
+    print("PASS: rendering, window controls, preferences, 105 keys, held input, contacts, eight painted mouse directions, scroll, shared paws, grooming, sleep, screens and lock.")

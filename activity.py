@@ -54,7 +54,7 @@ class Activity:
 
 
 class ActivityMonitor:
-    def __init__(self, global_input):
+    def __init__(self, global_input, wake_callback=None):
         self.global_input = global_input
         self.enabled = False
         self._lock = threading.Lock()
@@ -72,6 +72,18 @@ class ActivityMonitor:
         self._last_press = -math.inf
         self._motion = [0.0, 0.0]
         self._wheel = [0.0, 0.0]
+        self._wake_callback = wake_callback
+        self._notice_pending = False
+
+    def _notify(self):
+        # One queued UI notice per snapshot, even during dense pointer input.
+        if self._wake_callback is not None and not self._notice_pending:
+            self._notice_pending = True
+            self._wake_callback()
+
+    @property
+    def global_pointer_active(self):
+        return self.enabled and len(self._listeners) > 1 and self._listeners[1].is_alive()
 
     def set_enabled(self, enabled):
         if enabled == self.enabled:
@@ -185,6 +197,7 @@ class ActivityMonitor:
             if not self.enabled or (source is not None and source is not self._keyboard_listener):
                 return
             self._activity = replace(self._activity, keyboard=now)
+            self._notify()
             pending = self._releases.pop(code, None)
             if code in self._down:
                 # Core X11 repeat produces release/press with the same server time.
@@ -212,6 +225,7 @@ class ActivityMonitor:
                 now = time.monotonic()
                 self._releases[code] = now + RELEASE_GRACE, server_time
                 self._activity = replace(self._activity, keyboard=now)
+                self._notify()
 
     def _move(self, x, y):
         self.pointer_moved(x, y)
@@ -231,6 +245,7 @@ class ActivityMonitor:
                 self._activity = replace(self._activity, scroll=time.monotonic())
                 self._wheel[0] = max(-8, min(8, self._wheel[0] + dx))
                 self._wheel[1] = max(-8, min(8, self._wheel[1] + dy))
+                self._notify()
 
     def pointer_moved(self, x, y, local=False):
         with self._lock:
@@ -253,11 +268,13 @@ class ActivityMonitor:
             self._motion[0] = max(-240, min(240, self._motion[0] + dx))
             self._motion[1] = max(-240, min(240, self._motion[1] + dy))
             self._activity = replace(self._activity, mouse=time.monotonic())
+            self._notify()
 
     def pointer_click(self):
         with self._lock:
             if self.enabled:
                 self._activity = replace(self._activity, click=time.monotonic())
+                self._notify()
 
     def _clear_keys(self):
         self._down.clear(); self._releases.clear(); self._pulses.clear()
@@ -295,6 +312,7 @@ class ActivityMonitor:
                            scroll_x=self._wheel[0], scroll_y=self._wheel[1])
             self._motion[:] = (0.0, 0.0)
             self._wheel[:] = (0.0, 0.0)
+            self._notice_pending = False
             return result
 
     def _stop_listeners(self):
@@ -322,4 +340,5 @@ class ActivityMonitor:
             self._last_press = -math.inf
             self._motion[:] = (0.0, 0.0)
             self._wheel[:] = (0.0, 0.0)
+            self._notice_pending = False
         self._stop_listeners()

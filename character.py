@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, 
 from PySide6.QtSvg import QSvgRenderer
 
 from animations import Pose, mix, smoothstep
+from anatomy import BodyGeometry, FaceGeometry
 from keyboard_layout import BOARD, KEYS, LABELS
 
 
@@ -63,12 +64,14 @@ class CatArt:
         self.sleep_tail = curve(self.shapes['tail-sleep'])
         self.ears = {name: curve(self.shapes[name]) for name in ('ear-left', 'ear-right')}
         self.head_hit_paths = []
-        self.head_inverse = QTransform()
         self.head_center = 101.0
+        self.head_position = QPointF(103, 75)
         self.layers = {}
         self.cache_scale = 0.0
         self.layout = 'us'
         self.keyboard = QPixmap()
+        self.sleep_face = None
+        self.keys = {key.identifier: key for key in KEYS}
         self.key_paths = {key.identifier: polygon(key.polygon) for key in KEYS}
         self.fur = QColor('#30363b')
         self.iris = QColor('#d2cc91')
@@ -107,9 +110,16 @@ class CatArt:
         for key in KEYS:
             self.draw_key(p, key, False, scale)
         p.end(); self.keyboard.setDevicePixelRatio(scale)
+        self.sleep_face = None
+        image = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
+        image.fill(Qt.GlobalColor.transparent)
+        p = QPainter(image); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
+        resting = Pose(sleep=1, blink=1)
+        self._head(p, resting, BodyGeometry(resting)); p.end(); image.setDevicePixelRatio(scale)
+        self.sleep_face = image, self.head_hit_paths[:]
 
-    def draw_key(self, p, key, down, scale):
-        p.save(); p.translate(0, .65 if down else 0)
+    def draw_key(self, p, key, down, scale, pressure=0.0):
+        p.save(); p.translate(0, (.35 if down else 0) + pressure * .45)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#829294' if down else '#ccd2ce'))
         p.drawPath(self.key_paths[key.identifier])
         label = LABELS.get(self.layout, {}).get(key.identifier, key.label)
@@ -131,184 +141,149 @@ class CatArt:
         return [(mix(x, sx, sleep), mix(y, sy, sleep))
                 for (x, y), (sx, sy) in zip(self.shapes[a], self.shapes[b])]
 
-    def _body(self, p, pose):
-        sleep = smoothstep(pose.sleep)
+    def _body(self, p, pose, body):
+        sleep = body.sleep
         p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
         if sleep > .999:
-            p.save(); p.translate(92, 153); p.scale(1, 1 - pose.breath * .003)
-            p.translate(-92, -153); p.drawPath(self.sleep_body); p.restore()
+            p.save(); p.translate(104, 153); p.scale(1, 1 - pose.breath * .003)
+            p.translate(-104, -153); p.drawPath(self.sleep_body); p.restore()
             return
         points = self.blended('body', 'body-sleep', sleep)
-        warped = []
-        for x, y in points:
-            weight = max(0, min(1, (153 - y) / 65))
-            warped.append((x + pose.balance_x * weight,
-                           y + (pose.balance_y - pose.breath * .65 + pose.relax * 2) * weight))
-        body = curve(warped)
-        if sleep < .99:
-            gap = QPainterPath()
-            middle = 103 + pose.balance_x * .2
-            width = 6 * (1 - sleep)
-            gap.moveTo(middle - width, 155)
-            gap.cubicTo(middle - width * .3, 145, middle - width * .6, 129, middle, 123)
-            gap.cubicTo(middle + width * .7, 130, middle + width * .5, 146, middle + width, 155)
-            gap.closeSubpath()
-            body = body.subtracted(gap)
-        p.drawPath(body)
+        p.drawPath(curve([body.map(x, y) for x, y in points]))
 
-    def _tail(self, p, pose):
-        sleep = smoothstep(pose.sleep)
+    def _tail(self, p, pose, body):
+        sleep = body.sleep
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
         if sleep > .999:
             p.drawPath(self.sleep_tail)
             return
         points = self.blended('tail', 'tail-sleep', sleep)
         warped = []
-        count = len(points)
         for i, (x, y) in enumerate(points):
-            weight = math.sin(math.pi * i / (count - 1)) ** 2
+            weight = math.sin(math.pi * i / (len(points) - 1)) ** 2
             amplitude = (pose.tail * 2.4 + pose.pet * .8 + abs(pose.balance_velocity) * .012) * (1 - sleep)
-            warped.append((x + math.sin(pose.tail_phase - weight * 2) * amplitude * weight,
-                           y + math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55))
+            x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
+            y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
+            warped.append(body.map(x, y))
         p.drawPath(curve(warped))
 
     @staticmethod
     def shoulder(side, pose):
-        sleep = smoothstep(pose.sleep)
-        mouse = pose.mouse if side < 0 else 0
-        return (mix(91 if side < 0 else 115, 90 if side < 0 else 119, sleep) + pose.balance_x * .8 - mouse * 3,
-                mix(120, 139, sleep) + pose.balance_y * .8 - pose.breath * .4 + mouse * 4)
+        return BodyGeometry(pose).shoulder(side)
 
-    @staticmethod
-    def elbow(shoulder, wrist, side):
-        sx, sy = shoulder; dx, dy = wrist[0] - sx, wrist[1] - sy
-        distance = max(.001, math.hypot(dx, dy))
-        upper, lower = 27.0, 30.0
-        stretch = max(1, distance / ((upper + lower) * .98))
-        upper, lower = upper * stretch, lower * stretch
-        along = (upper * upper - lower * lower + distance * distance) / (2 * distance)
-        height = min(9, math.sqrt(max(0, upper * upper - along * along)))
-        nx, ny = unit(side * max(.4, abs(dy / distance)), -.3 * dx / distance)
-        return sx + dx / distance * along + nx * height, sy + dy / distance * along + ny * height
-
-    def _arm(self, p, pose, side):
-        sx, sy = self.shoulder(side, pose)
+    def _arm(self, p, pose, side, body):
+        sx, sy = body.shoulder(side)
         wx, wy = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
-        ex, ey = self.elbow((sx, sy), (wx, wy), side)
-        ax, ay = unit(ex - sx, ey - sy); bx, by = unit(wx - ex, wy - ey); tx, ty = unit(wx - sx, wy - sy)
-        normals = ((-ay, ax), (-ty, tx), (-by, bx)); widths = (7.0, 5.0, 3.0)
+        dx, dy = wx - sx, wy - sy
+        distance = math.hypot(dx, dy)
+        bend = max(4, 12 - distance * .09)
+        cx = (sx + wx) * .5 + side * bend
+        cy = (sy + wy) * .5 + min(9, abs(dx) * .12)
+        left, right = [], []
+        for i in range(15):
+            t = i / 14; u = 1 - t
+            x, y = u * u * sx + 2 * u * t * cx + t * t * wx, u * u * sy + 2 * u * t * cy + t * t * wy
+            tx, ty = unit(u * (cx - sx) + t * (wx - cx), u * (cy - sy) + t * (wy - cy))
+            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * .6
+            left.append((x - ty * radius, y + tx * radius))
+            right.append((x + ty * radius, y - tx * radius))
+        tx, ty = unit(wx - cx, wy - cy)
+        cap = [(wx + (tx * math.sin(a) - ty * math.cos(a)) * 3,
+                wy + (ty * math.sin(a) + tx * math.cos(a)) * 3)
+               for a in (math.pi / 4, math.pi / 2, math.pi * .75)]
+        points = left + cap + list(reversed(right)) + [(sx - dx / max(1, distance) * 5, sy - dy / max(1, distance) * 5)]
         path = QPainterPath()
-        for sign in (1, -1):
-            snx, sny = (v * sign * widths[0] for v in normals[0])
-            enx, eny = (v * sign * widths[1] for v in normals[1])
-            wnx, wny = (v * sign * widths[2] for v in normals[2])
-            if sign == 1:
-                path.moveTo(sx + snx, sy + sny)
-                path.cubicTo(sx + ax * 9 + snx, sy + ay * 9 + sny,
-                             ex - tx * 4 + enx, ey - ty * 4 + eny, ex + enx, ey + eny)
-                path.cubicTo(ex + tx * 4 + enx, ey + ty * 4 + eny,
-                             wx - bx * 6 + wnx, wy - by * 6 + wny, wx + wnx, wy + wny)
-            else:
-                path.lineTo(wx + wnx, wy + wny)
-                path.cubicTo(wx - bx * 6 + wnx, wy - by * 6 + wny,
-                             ex + tx * 4 + enx, ey + ty * 4 + eny, ex + enx, ey + eny)
-                path.cubicTo(ex - tx * 4 + enx, ey - ty * 4 + eny,
-                             sx + ax * 9 + snx, sy + ay * 9 + sny, sx + snx, sy + sny)
-        nx, ny = normals[0]
-        path.cubicTo(sx - ax * 5 - nx * widths[0], sy - ay * 5 - ny * widths[0],
-                     sx - ax * 5 + nx * widths[0], sy - ay * 5 + ny * widths[0],
-                     sx + nx * widths[0], sy + ny * widths[0])
+        path.moveTo((points[-1][0] + points[0][0]) * .5, (points[-1][1] + points[0][1]) * .5)
+        for i, (x, y) in enumerate(points):
+            following = points[(i + 1) % len(points)]
+            path.quadTo(x, y, (x + following[0]) * .5, (y + following[1]) * .5)
         path.closeSubpath(); p.setPen(Qt.PenStyle.NoPen)
-        # A slight flat tone keeps a raised leg readable against its chest.
-        tone = round(pose.groom * 6) if side < 0 else 0
+        tone = round(pose.groom * 5) if side < 0 else 0
         p.setBrush(QColor(48 + tone, 54 + tone, 59 + tone) if tone else self.fur)
         p.drawPath(path)
 
     def head_hit(self, point):
         if not any(path.contains(point) for path in self.head_hit_paths):
             return None
-        local = self.head_inverse.map(point)
-        return max(-1, min(1, (local.x() - self.head_center) / 30))
+        return max(-1, min(1, (point.x() - self.head_center) / 30))
 
-    def _head(self, p, pose):
-        s = smoothstep(pose.sleep)
-        yaw, pitch = pose.head_x * (1 - s), pose.head_y * (1 - s)
+    def _head(self, p, pose, body):
+        face = FaceGeometry(pose, body)
+        self.head_position = QPointF(face.cx, face.cy)
+        s = body.sleep
+        if s > .999 and self.sleep_face is not None:
+            image, paths = self.sleep_face
+            transform = QTransform.fromTranslate(face.cx - 110, face.cy - 131)
+            p.drawPixmap(QPointF(face.cx - 110, face.cy - 131), image)
+            self.head_hit_paths = [transform.map(path) for path in paths]
+            self.head_center = face.cx
+            return
         cx, cy = mix(101, 110, s), mix(77, 131, s)
-        dx = pose.balance_x * .8
-        dy = (pose.balance_y * .45 - pose.breath * .3 + pose.groom * 2.5
-              + pitch * (6 if pitch > 0 else 4) + pose.pet * 3)
-        transform = QTransform()
-        transform.translate(cx + dx, cy + dy - 4 * (1 - s))
-        transform.rotate(pose.head_tilt * (1 - s))
-        transform.scale(mix(.90, 1, s), mix(.90, 1, s))
-        transform.translate(-cx, -cy)
-        self.head_inverse = transform.inverted()[0]
-        self.head_center = cx
-        p.save(); p.setTransform(transform, True)
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
+        self.head_center = face.cx
         self.head_hit_paths = []
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
         for side, name, anchor in ((-1, 'ear-left', (82, 57)), (1, 'ear-right', (125, 57))):
-            ear = QTransform()
-            ear.translate(mix(anchor[0], 91 if side < 0 else 128, s) - yaw * 2,
-                          mix(anchor[1], 120, s) + pitch * 2)
-            ear.rotate((pose.ear_left if side < 0 else pose.ear_right) + side * s * 27
-                       - yaw * 5 + side * pose.pet * 13)
-            ear.scale(1 - max(0, side * yaw) * .25, 1 - s * .25 - max(0, pitch) * .05)
-            ear.translate(-anchor[0], -anchor[1])
-            path = ear.map(self.ears[name]); p.drawPath(path)
-            self.head_hit_paths.append(transform.map(path))
-        if s > .999:
-            shape = self.sleep_head
-        else:
-            points = self.blended('head-shape', 'head-sleep', s)
-            points = [(cx + (x - cx) * (1 - abs(yaw) * .11) + yaw * 2.8,
-                       cy + (y - cy) * (1 - max(0, pitch) * .10 - pose.pet * .025)) for x, y in points]
-            shape = curve(points)
-        p.drawPath(shape); self.head_hit_paths.append(transform.map(shape))
+            angle = math.radians((pose.ear_left if side < 0 else pose.ear_right)
+                                 + side * s * 27 + side * pose.pet * 13)
+            cos, sin = math.cos(angle), math.sin(angle)
+            ax, ay = mix(anchor[0], 91 if side < 0 else 128, s), mix(anchor[1], 120, s)
+            points = []
+            for x, y in self.shapes[name]:
+                x, y = (x - anchor[0]) * (1 - s * .25), (y - anchor[1]) * (1 - s * .25)
+                points.append(face.point(ax + x * cos - y * sin - cx,
+                                         ay + x * sin + y * cos - cy, -3))
+            path = curve(points); p.drawPath(path); self.head_hit_paths.append(path)
+        points = self.blended('head-shape', 'head-sleep', s)
+        shape = curve([face.outline(x - cx, y - cy) for x, y in points])
+        p.drawPath(shape); self.head_hit_paths.append(shape)
         blink = max(pose.blink, smoothstep((s - .35) / .65), pose.yawn * .92,
                     pose.groom * (.65 if pose.action == 'wash' else .2))
+        p.save(); p.setClipPath(shape)
         for side in (-1, 1):
-            ex = mix(101 + side * 13.5, 110 + side * 10, s) + yaw * 7
-            ey = mix(76, 131, s) + pitch * 3.4
-            width = mix(8.5, 7.8, s) * (1 - max(0, side * yaw) * .28)
-            top = mix(-9, 1.1, blink) * (1 - abs(pitch) * .12)
-            bottom = mix(8, 1.1, blink)
-            aperture = QPainterPath(); aperture.moveTo(ex - width, ey)
-            aperture.cubicTo(ex - width * .65, ey + top, ex + width * .65, ey + top, ex + width, ey)
-            aperture.cubicTo(ex + width * .65, ey + bottom, ex - width * .65, ey + bottom, ex - width, ey)
-            aperture.closeSubpath(); p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.iris); p.drawPath(aperture)
-            p.save(); p.setClipPath(aperture)
-            px = ex + (pose.gaze_x - yaw * .25) * 2.3 * (1 - s)
-            py = ey + pose.gaze_y * 2.2 * (1 - s)
-            pupil = QPainterPath(); pupil.moveTo(px, py - 7)
-            pupil.cubicTo(px - 2.7, py - 3, px - 2.7, py + 3, px, py + 7)
-            pupil.cubicTo(px + 2.7, py + 3, px + 2.7, py - 3, px, py - 7)
+            ex, ey = side * mix(13.5, 10, s), -1
+            width = mix(8.1, 7.8, s)
+            top, bottom = mix(-8.7, 1.1, blink), mix(7.6, 1.1, blink)
+            aperture = curve([face.point(ex - width, ey), face.point(ex - width * .65, ey + top),
+                              face.point(ex + width * .65, ey + top), face.point(ex + width, ey),
+                              face.point(ex + width * .65, ey + bottom), face.point(ex - width * .65, ey + bottom),
+                              face.point(ex - width, ey)])
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.iris); p.drawPath(aperture)
+            p.save(); p.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
+            px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5 * (1 - s)
+            py = ey + pose.gaze_y * 2.0 * (1 - s)
+            pupil = curve([face.point(px, py - 7), face.point(px - 2.5, py - 3),
+                           face.point(px - 2.5, py + 3), face.point(px, py + 7),
+                           face.point(px + 2.5, py + 3), face.point(px + 2.5, py - 3), face.point(px, py - 7)])
             p.setBrush(self.pupil); p.drawPath(pupil); p.restore()
             if blink > .85:
-                lid = QPainterPath(); lid.moveTo(ex - width, ey)
-                lid.cubicTo(ex - width * .65, ey + 1.1, ex + width * .65, ey + 1.1, ex + width, ey)
+                lid = QPainterPath(); lid.moveTo(*face.point(ex - width, ey))
+                lid.cubicTo(*face.point(ex - width * .65, ey + 1.1),
+                            *face.point(ex + width * .65, ey + 1.1), *face.point(ex + width, ey))
                 p.setPen(QPen(QColor('#788388'), .65)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPath(lid)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.pupil)
+        p.drawPath(polygon([face.point(-1.2, 10), face.point(1.2, 10), face.point(0, 11.3)]))
+        if pose.yawn > .03 or pose.tongue > .03:
+            mouth = []
+            for i in range(16):
+                angle = i * math.tau / 16
+                mouth.append(face.point(math.cos(angle) * (2.5 + pose.yawn * .8),
+                                        15 + math.sin(angle) * (.5 + pose.yawn * 6)))
+            p.drawPath(polygon(mouth))
+            if pose.tongue > .03:
+                tongue = polygon([face.point(-1, 16), face.point(1.5, 16),
+                                  face.point(1.0, 18 + pose.tongue), face.point(-.5, 18 + pose.tongue)])
+                p.setBrush(QColor('#b87e86')); p.drawPath(tongue)
+        p.restore()
         for side in (-1, 1):
-            root_x = cx + side * mix(22, 16, s) + yaw * 7
-            root_y = mix(87, 137, s) + pitch * 3
-            length = mix(15, 12, s) * (1 - max(0, side * yaw) * .3)
-            flex = pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5 + pose.balance_velocity * .008
+            flex = pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5 + pose.balance_velocity * .006
             p.setPen(QPen(QColor('#7e898c'), .65, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.setBrush(Qt.BrushStyle.NoBrush)
             for level in (-1, 1):
-                whisker = QPainterPath(); whisker.moveTo(root_x, root_y + level * 1.4)
-                whisker.cubicTo(root_x + side * length * .4, root_y + level * 1.8,
-                                root_x + side * length * .8, root_y + level * 3 + flex,
-                                root_x + side * length, root_y + level * 3.2 + flex)
+                whisker = QPainterPath(); whisker.moveTo(*face.point(side * mix(22, 16, s), 10 + level * 1.4))
+                whisker.cubicTo(*face.point(side * mix(27, 20, s), 10 + level * 1.8, 12),
+                                *face.point(side * mix(33, 26, s), 10 + level * 3 + flex, 8),
+                                *face.point(side * mix(37, 29, s), 10 + level * 3.2 + flex, 6))
                 p.drawPath(whisker)
-        if pose.yawn > .03 or pose.tongue > .03:
-            mx, my = 102 + yaw * 7, 92 + pitch * 3
-            p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.pupil)
-            p.drawEllipse(QPointF(mx, my), 2.5 + pose.yawn * .8, .5 + pose.yawn * 6)
-            if pose.tongue > .03:
-                p.setBrush(QColor('#b87e86'))
-                p.drawEllipse(QPointF(mx + .5, my + 2 + pose.tongue), 1.5, 1 + pose.tongue)
-        p.restore()
 
     def _zzz(self, p, pose):
         if pose.zzz < .01:
@@ -323,11 +298,16 @@ class CatArt:
 
     def draw(self, p, pose):
         p.save(); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
-        self._tail(p, pose); self.layer(p, 'hind-feet'); self._body(p, pose)
+        body = BodyGeometry(pose)
+        self._tail(p, pose, body)
+        p.save(); p.translate(104, 153); p.scale(mix(1, .82, body.sleep), mix(1, .65, body.sleep))
+        p.translate(-104, -153); self.layer(p, 'hind-feet'); p.restore()
+        self._body(p, pose, body)
         p.drawPixmap(0, 0, self.keyboard)
-        for key in KEYS:
-            if key.identifier in pose.pressed:
-                self.draw_key(p, key, True, self.cache_scale)
+        pressures = dict(pose.contacts)
+        for identifier in pose.pressed | pressures.keys():
+            key = self.keys[identifier]
+            self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse'); p.restore()
         if pose.scroll > .01:
             p.setPen(QPen(QColor('#586970'), 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
@@ -337,13 +317,16 @@ class CatArt:
         washing_face = pose.action == 'wash' and pose.groom > .01
         if pose.sleep < .995:
             if not washing_face:
-                self._arm(p, pose, -1)
-            self._arm(p, pose, 1)
-        self._head(p, pose)
+                self._arm(p, pose, -1, body)
+            self._arm(p, pose, 1, body)
+        self._head(p, pose, body)
         if washing_face:
-            self._arm(p, pose, -1)
+            self._arm(p, pose, -1, body)
         for side in (-1, 1):
             x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
             p.save(); p.translate(x, y); p.rotate(pose.mouse * 12 if side < 0 else 0)
+            pressure = pose.left_pressure if side < 0 else pose.right_pressure
+            p.scale(1 + pressure * .035, 1 - pressure * .10)
+            p.translate(0, -3.5)
             self.layer(p, 'paw'); p.restore()
         self._zzz(p, pose); p.restore()

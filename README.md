@@ -6,7 +6,8 @@ activity in a transparent window without taking keyboard focus.
 
 ## Features
 
-- Minimal flat silhouettes, a seated feline posture and organically bending forelegs.
+- Minimal flat silhouettes, grounded haunches and continuous tapered forelegs.
+- A shared body deformation keeps the chest, neck, shoulders and head connected.
 - A full-size 105-key QWERTY keyboard, including function keys, navigation and
   a separate number pad. Key shapes also define the paws' contact targets.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
@@ -15,9 +16,12 @@ activity in a transparent window without taking keyboard focus.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Typing speed follows actual press cadence and reach distance, with continuous
   redirection instead of queued strokes.
+- Actual paw contacts produce small coordinated chest, head and key reactions.
 - The mouse travels across a bounded area with its paw, then stays where it was left.
 - Scrolling reaches and holds the mouse without moving it; the other paw can type.
 - Coordinated eyes, head, whiskers, torso, ears and flexible tail, at up to 30 FPS.
+- Eyes and head respond independently to shared attention; facial features use
+  a small projected surface to follow turns and downward glances.
 - Occasional grooming, face washing, yawning, glancing and small posture changes.
 - Gradual relaxation and a tucked sleeping posture with slow breathing and small Zzz.
 - Smooth interruption of grooming and sleep when activity resumes.
@@ -96,6 +100,7 @@ pointer movement or scrolling, followed by a smooth transfer. A stationary point
 click alone does not keep the paw on the mouse or keep the cat watching the
 cursor. When typing without pointer motion, attention moves to the keyboard.
 Scrolling without pointer movement directs attention to the small mouse.
+Mouse travel uses screen directions, independently of the keyboard's orientation.
 
 Held keys stay visibly pressed without repeating the paw's stroke. Fast taps
 leave a brief visual mark; rapid typing updates current paw targets rather than
@@ -142,3 +147,7 @@ availability; all recognized keys still show their pressed state. Labels are
 omitted when rendering resolution is too small, and unsupported keys do not
 generate invented strokes. Keyboard layout changes take effect after restarting
 input reactions; switching among existing XKB layout groups is detected while running.
+With a paw reserved for the mouse, very distant keys may exceed the remaining
+paw's comfortable reach. Their input state is still displayed; a contact reaction
+only occurs if the paw actually reaches the key. The full-size layout includes
+the extra ISO key, but does not reproduce every hardware-specific keycap shape.
