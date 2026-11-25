@@ -13,6 +13,7 @@ def main() -> int:
     QCoreApplication.setApplicationName("mascota")
     app = QApplication(sys.argv)
     pet = PetWindow()
+    app.aboutToQuit.connect(pet.shutdown)
     pet.show()
     return app.exec()
 
