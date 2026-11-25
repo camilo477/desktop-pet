@@ -14,7 +14,7 @@ from PySide6.QtGui import QCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from activity import Activity
+from activity import Activity, ActivityMonitor
 from animations import Animations
 from main import instance_busy
 from pet import PetWindow, visible_position
@@ -79,7 +79,29 @@ def check_motion_and_screens() -> None:
         pose = animation.advance(1 / 30)
     assert pose.typing < 0.01 and pose.left_paw < 0.01
     animation.pet()
-    assert animation.advance(0.14).blink > 0.9
+    assert animation.advance(0.09).blink > 0.95
+
+    monitor = ActivityMonitor(False)
+    monitor.set_enabled(True)
+    monitor.pointer_moved(100, 100)
+    movement = monitor.snapshot().mouse
+    monitor.pointer_moved(100, 100)
+    monitor.pointer_activity(click=True)
+    assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
+    monitor.stop()
+    animation = Animations()
+    for frame in range(1, 31):
+        pose = animation.advance(1 / 30, frame / 30, Activity(click=frame / 30), (1, -1))
+    assert pose.mouse == 0 and pose.right_x == 108
+    for frame in range(31, 61):
+        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=frame / 30))
+    assert pose.mouse > .99 and pose.right_x > 155
+    for frame in range(61, 73):
+        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=2.0))
+    assert pose.mouse > .99
+    for frame in range(73, 121):
+        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=2.0))
+    assert pose.mouse < .01 and abs(pose.right_x - 108) < .1
 
 
 def check_instance_lock() -> None:

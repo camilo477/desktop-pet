@@ -1,15 +1,14 @@
 """Transparent desktop window and the original layered character."""
 
 import math
-from pathlib import Path
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPainterPath, QPixmap, QRegion
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtCore import QEvent, QPoint, QRect, QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
-from animations import Animations, Pose
+from animations import Animations
+from character import CatArt
 from activity import Activity, ActivityMonitor, supports_global_input
 
 
@@ -31,113 +30,6 @@ def visible_position(position: QPoint, size: QSize, areas: list[QRect]) -> QPoin
         max(area.left(), min(position.x(), max(area.left(), area.right() - size.width() + 1))),
         max(area.top(), min(position.y(), max(area.top(), area.bottom() - size.height() + 1))),
     )
-
-
-class CatArt:
-    LAYERS = (
-        "tail", "body", "ear-left", "ear-right", "head", "eyes",
-        "pupil-left", "pupil-right", "eyelids", "desk-legs", "desk",
-        "mouse-mat", "keyboard", "mouse", "arm-left", "arm-right",
-    )
-
-    def __init__(self) -> None:
-        path = Path(__file__).resolve().parent / "assets" / "cat" / "miga.svg"
-        self.renderer = QSvgRenderer(str(path))
-        if not self.renderer.isValid():
-            raise RuntimeError("Could not load the character artwork.")
-        self.layers: dict[str, tuple[QPointF, QPixmap]] = {}
-        self.cache_scale = 0.0
-        self.eye_clip = QPainterPath()
-        self.eye_clip.addEllipse(QRectF(69.5, 79.6, 16.0, 18.6))
-        self.eye_clip.addEllipse(QRectF(107.5, 79.6, 16.1, 18.6))
-
-    def cache(self, size: int, pixel_ratio: float) -> None:
-        pixels = math.ceil(size * pixel_ratio)
-        scale = pixels / 200.0
-        if scale == self.cache_scale:
-            return
-        self.cache_scale = scale
-        for name in self.LAYERS:
-            if not self.renderer.elementExists(name):
-                raise RuntimeError(f"Missing character layer: {name}")
-            bounds = self.renderer.boundsOnElement(name)
-            left_px = math.floor((bounds.left() - 2) * scale)
-            top_px = math.floor((bounds.top() - 2) * scale)
-            width = math.ceil((bounds.right() + 2) * scale) - left_px
-            height = math.ceil((bounds.bottom() + 2) * scale) - top_px
-            origin = QPointF(left_px / scale, top_px / scale)
-            pixmap = QPixmap(width, height)
-            pixmap.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.scale(scale, scale)
-            painter.translate(-origin.x(), -origin.y())
-            self.renderer.render(painter, name, bounds)
-            painter.end()
-            pixmap.setDevicePixelRatio(scale)
-            self.layers[name] = (origin, pixmap)
-
-    def draw(self, painter: QPainter, pose: Pose) -> None:
-        def layer(name: str) -> None:
-            position, pixmap = self.layers[name]
-            painter.drawPixmap(position, pixmap)
-
-        painter.save()
-        painter.setRenderHints(
-            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform
-        )
-        painter.save()
-        painter.translate(130, 137)
-        painter.rotate(pose.tail)
-        painter.translate(-130, -137)
-        layer("tail")
-        painter.restore()
-
-        painter.save()
-        painter.translate(0, pose.breath * 0.4)
-        layer("body")
-        painter.translate(97, 109)
-        painter.rotate(pose.gaze_x * 2.5)
-        painter.translate(-97 + pose.gaze_x * 0.6, -109 + pose.breath * 0.6)
-        for name in ("ear-left", "ear-right", "head"):
-            layer(name)
-
-        painter.save()
-        painter.translate(0, 89)
-        painter.scale(1, max(0.025, 1.0 - pose.blink))
-        painter.translate(0, -89)
-        painter.setOpacity(1.0 - pose.blink ** 4)
-        layer("eyes")
-        painter.setClipPath(self.eye_clip)
-        painter.translate(pose.gaze_x * 2.0, pose.gaze_y * 1.6)
-        layer("pupil-left")
-        layer("pupil-right")
-        painter.restore()
-        if pose.blink > 0.6:
-            painter.save()
-            painter.setOpacity((pose.blink - 0.6) / 0.4)
-            layer("eyelids")
-            painter.restore()
-        painter.restore()
-
-        for name in ("desk-legs", "desk", "mouse-mat", "keyboard"):
-            layer(name)
-        painter.save()
-        painter.translate(0, pose.click * 0.45)
-        layer("mouse")
-        painter.restore()
-        for name, x, y, angle, lift in (
-            ("arm-left", 77, 119, -pose.left_paw * 5.0, pose.left_paw),
-            ("arm-right", 121, 120, pose.typing * 68.0 - pose.mouse * 2.5,
-             pose.right_paw - pose.click * 0.45),
-        ):
-            painter.save()
-            painter.translate(x, y)
-            painter.rotate(angle)
-            painter.translate(-x, -y - lift * 1.8)
-            layer(name)
-            painter.restore()
-        painter.restore()
 
 
 class PetWindow(QWidget):
@@ -182,6 +74,7 @@ class PetWindow(QWidget):
         self.frame = QPixmap()
         self.last_mask = QRegion()
         self.mask_time = 0.0
+        self.mask_signature = None
         self.timer = QTimer(self)
         self.timer.setInterval(34)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -234,8 +127,9 @@ class PetWindow(QWidget):
         if self.reactions:
             if self.global_input:
                 cursor = QCursor.pos() - self.pos()
-                gaze = ((cursor.x() - self.width() * 0.48) / max(self.width(), 1),
-                        (cursor.y() - self.height() * 0.45) / max(self.height(), 1))
+                area = self.screen().geometry()
+                gaze = (math.tanh((cursor.x() - self.width() * 0.47) / (area.width() * 0.28)),
+                        math.tanh((cursor.y() - self.height() * 0.30) / (area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
         self.animations.advance(min(now - self.last_frame, 0.1), now,
@@ -257,7 +151,14 @@ class PetWindow(QWidget):
         painter.end()
         now = time.monotonic()
         handle = self.windowHandle()
-        if handle and (force_mask or now - self.mask_time >= 0.1):
+        pose = self.animations.pose
+        signature = (round(pose.left_x * 2), round(pose.left_y * 2),
+                     round(pose.right_x * 2), round(pose.right_y * 2),
+                     round(pose.head_x * 20), round(pose.head_y * 20),
+                     round(pose.ear_left * 2), round(pose.ear_right * 2),
+                     round(pose.tail * math.sin(pose.tail_phase) * 20),
+                     round(pose.tail * math.cos(pose.tail_phase) * 20))
+        if handle and (force_mask or signature != self.mask_signature or now - self.mask_time >= 0.1):
             # Native masks use logical pixels; keep antialiased edges inside the mask.
             image = self.frame.toImage().scaled(self.size())
             image.setDevicePixelRatio(1)
@@ -270,6 +171,7 @@ class PetWindow(QWidget):
                     handle.setMask(region)
                 self.last_mask = region
             self.mask_time = now
+            self.mask_signature = signature
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -296,7 +198,8 @@ class PetWindow(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
-        self.activity.pointer_activity()
+        position = event.globalPosition()
+        self.activity.pointer_moved(position.x(), position.y(), local=True)
         if self.reactions and not self.paused:
             self.local_gaze = ((event.position().x() / self.width() - 0.48) * 2.0,
                                (event.position().y() / self.height() - 0.45) * 2.0)

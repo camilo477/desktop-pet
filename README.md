@@ -1,23 +1,27 @@
 # Miga · Desktop Pet
 
-An original little ginger cat at a wooden desk, built for Linux with Python,
-PySide6 and SVG. The transparent window stays above other windows without
-taking keyboard focus. Miga breathes, blinks and occasionally flicks its tail.
+An original charcoal cat with a compact keyboard and mouse, built for Linux
+with Python, PySide6 and SVG. The transparent window stays above other windows
+without taking keyboard focus. Miga breathes, blinks and occasionally flicks
+its ears and flexible tail.
 
-![Miga at a wooden desk](assets/cat/miga.svg)
+![Miga with a keyboard and mouse](assets/cat/miga.svg)
 
 ## Features
 
 - Original layered SVG artwork, with smooth independent animations at up to 30 FPS.
-- Keyboard paws, mouse movement and click reactions on X11.
-- Gently interpolated eyes and head that follow the pointer.
+- Articulated forelegs, varied typing movements and smooth keyboard/mouse transfers.
+- Both paws rest at the keyboard; real pointer motion reaches for the mouse,
+  then the paw returns after a short idle interval.
+- Perspective-aware head shapes, coordinated facial features and quicker pupil tracking.
+- Closing eyelids, subtle torso breathing and deformation along the tail.
 - Dragging, a small reaction when petted, and clicks through empty window areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
 
-Input callbacks immediately discard key values. Only the latest activity times
-and a smoothed typing interval are kept in memory. No input history, logs,
-telemetry or internet connections are used.
+Input callbacks immediately discard key values. Only activity timing and the
+current pointer position and motion are kept in memory. No input history,
+logs, telemetry or internet connections are used.
 
 ## Technologies
 
@@ -75,6 +79,11 @@ animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 Pausing stops the animation timer and input listeners while keeping dragging
 and menu controls available. Disabling activity reactions stops global input
 listeners; breathing, blinking and occasional tail movement continue.
+
+The mouse hand returns to the keyboard after approximately 500 ms without real
+pointer movement, followed by a smooth transfer. A stationary pointer or a
+click alone does not keep the hand on the mouse. Typing can continue with one
+paw while the other uses the mouse.
 
 ## Linux compatibility
 

@@ -25,6 +25,8 @@ class Activity:
     mouse: float = -math.inf
     click: float = -math.inf
     key_interval: float = 0.15
+    motion_x: float = 0.0
+    motion_y: float = 0.0
 
 
 class ActivityMonitor:
@@ -34,6 +36,8 @@ class ActivityMonitor:
         self._lock = threading.Lock()
         self._activity = Activity()
         self._listeners = []
+        self._global_position = None
+        self._local_position = None
 
     def set_enabled(self, enabled: bool) -> None:
         if enabled == self.enabled:
@@ -69,11 +73,11 @@ class ActivityMonitor:
                 interval = now - old.keyboard
                 interval = 0.15 if interval > 1.0 else max(0.065, min(interval, 0.3))
                 self._activity = Activity(now, old.mouse, old.click,
-                                          old.key_interval * 0.65 + interval * 0.35)
+                                          old.key_interval * 0.65 + interval * 0.35,
+                                          old.motion_x, old.motion_y)
 
     def _move(self, x, y) -> None:
-        del x, y
-        self.pointer_activity()
+        self.pointer_moved(x, y)
 
     def _click(self, x, y, button, pressed) -> None:
         del x, y, button
@@ -82,15 +86,31 @@ class ActivityMonitor:
 
     def _scroll(self, x, y, dx, dy) -> None:
         del x, y, dx, dy
-        self.pointer_activity()
+        self.pointer_activity(click=True)
+
+    def pointer_moved(self, x: float, y: float, local: bool = False) -> None:
+        with self._lock:
+            if not self.enabled:
+                return
+            previous = self._local_position if local else self._global_position
+            position = (x, y)
+            if previous == position:
+                return
+            if local:
+                self._local_position = position
+            else:
+                self._global_position = position
+            dx, dy = (x - previous[0], y - previous[1]) if previous else (0.0, 0.0)
+            old = self._activity
+            self._activity = Activity(old.keyboard, time.monotonic(), old.click, old.key_interval,
+                                      math.tanh(dx / 12.0), math.tanh(dy / 12.0))
 
     def pointer_activity(self, click: bool = False) -> None:
-        now = time.monotonic()
         with self._lock:
-            if self.enabled:
+            if self.enabled and click:
                 old = self._activity
-                self._activity = Activity(old.keyboard, now,
-                                          now if click else old.click, old.key_interval)
+                self._activity = Activity(old.keyboard, old.mouse, time.monotonic(),
+                                          old.key_interval, old.motion_x, old.motion_y)
 
     def snapshot(self) -> Activity:
         with self._lock:
@@ -114,4 +134,6 @@ class ActivityMonitor:
         with self._lock:
             self.enabled = False
             self._activity = Activity()
+            self._global_position = None
+            self._local_position = None
         self._stop_listeners()
