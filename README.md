@@ -15,20 +15,55 @@ taking keyboard focus. Miga breathes, blinks and occasionally flicks its tail.
 
 Input callbacks immediately discard key values. Only the latest activity times
 and a smoothed typing interval are kept in memory. No input history, logs,
-telemetry or network connections are used.
+telemetry or internet connections are used.
+
+## Technologies
+
+Python 3, PySide6 (Qt Widgets, Qt SVG, local Qt sockets and QSettings), pynput
+and original SVG artwork. Only PySide6 Essentials is installed; optional Qt
+modules such as WebEngine are not needed.
 
 ## Requirements
 
-- Linux with Python 3.10 or newer and support for virtual environments.
+- Linux with Python 3.10 or newer, pip and support for virtual environments.
 - A graphical desktop with compositing enabled.
+- Qt's platform libraries for your desktop, usually supplied by the distribution.
+  Some distributions also need Python headers and a C compiler to install
+  pynput's transitive dependencies when binary wheels are unavailable.
 
-## Installation and use
+## Installation
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python main.py
+git clone https://github.com/camilo477/desktop-pet.git
+cd desktop-pet
+./install.sh
 ```
+
+The installer creates `.venv` in this directory and a launcher in
+`~/.local/bin/mascota`. It needs no administrator privileges and can be run
+again. Keep the project directory in place. Installation may download packages;
+the application then runs entirely offline.
+
+If `~/.local/bin` is missing from your PATH, add this line once to your shell
+configuration and open a new terminal:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The installer does not change your shell configuration or set up automatic startup.
+
+## Usage
+
+```sh
+mascota       # Start in the background; the terminal can be closed.
+mascota off   # Save preferences and close only this application.
+```
+
+The command works from any directory. Repeated starts reuse the existing
+instance. A private local socket handles shutdown, with a process lock protecting
+startup and recovery after unexpected exits. No HTTP server or background service
+is installed.
 
 Drag the cat with the left mouse button. Click for a small reaction. The
 right-click menu offers **Tamaño** (150, 200 or 300 logical pixels), **Siempre
@@ -52,5 +87,12 @@ listeners; breathing, blinking and occasional tail movement continue.
   requests. No root access, input-device permissions or desktop extensions
   are required.
 
+## Known limitations
+
 The window and global input have been checked on GNOME/X11. Native Wayland,
 KDE Plasma and physical multi-monitor setups require further manual checks.
+GNOME/Wayland and other compositors can restrict topmost behavior and exact
+position restoration. Global keyboard and pointer tracking are unavailable in
+Wayland sessions; local pointer tracking still works while the pointer is over
+Miga. Without an X11 input-recording facility, global activity can be unavailable
+even when local interactions work.
