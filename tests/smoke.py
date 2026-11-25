@@ -293,6 +293,37 @@ def check_geometry_and_contacts() -> None:
             else:
                 assert abs(moved[i] - origin[i]) < .2
 
+    # Reverse while the spring is still catching a saturated target.
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1)):
+        animation = Animations()
+        now = 0.0
+        for frame in range(18):
+            now += 1 / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now))
+        assert animation.mouse_contact
+        for frame in range(5):
+            now += 1 / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now, motion_x=dx * 24, motion_y=dy * 24))
+        for frame in range(10):
+            before = pose.mouse_dx, pose.mouse_dy
+            now += 1 / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now, motion_x=-dx * 6, motion_y=-dy * 6))
+            for axis, direction in enumerate((-dx, -dy)):
+                after = (pose.mouse_dx, pose.mouse_dy)[axis]
+                assert (after - before[axis]) * direction >= -1e-8, 'Mouse continued against the new direction'
+            assert abs(pose.mouse_dx) <= 12 and abs(pose.mouse_dy) <= 10
+            assert math.dist((pose.left_x, pose.left_y), (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy)) < .01
+
+        # Turning onto the other axis must not replay the previous axis's reach.
+        if not (dx and dy):
+            before = pose.mouse_dx, pose.mouse_dy
+            now += 1 / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now, motion_x=0 if dx else 6, motion_y=0 if dy else 6))
+            if dx:
+                assert pose.mouse_dx == before[0]
+            if dy:
+                assert pose.mouse_dy == before[1]
+
     for key in KEYS:
         animation = Animations()
         for frame in range(30):

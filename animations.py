@@ -289,18 +289,35 @@ class Animations:
 
     def _mouse_motion(self, dt, activity, active):
         pose = self.pose
-        if active:
-            # Screen deltas stay in screen space; the keyboard floor rotation is unrelated.
-            self.mouse_target[0] = max(-12, min(12, self.mouse_target[0] + activity.motion_x * .11))
-            self.mouse_target[1] = max(-10, min(10, self.mouse_target[1] + activity.motion_y * .10))
-        else:
+        if not active:
             self.mouse_contact = False
-        # The object waits for its paw. Once gripped, they share one spring.
-        if self.mouse_contact or not active:
-            pose.mouse_dx, self.mouse_velocity[0] = spring(
-                pose.mouse_dx, self.mouse_velocity[0], self.mouse_target[0], 21, dt)
-            pose.mouse_dy, self.mouse_velocity[1] = spring(
-                pose.mouse_dy, self.mouse_velocity[1], self.mouse_target[1], 21, dt)
+        positions = [pose.mouse_dx, pose.mouse_dy]
+        moving = active and (activity.motion_x != 0 or activity.motion_y != 0)
+        # Screen deltas stay in screen space; keyboard orientation is unrelated.
+        for axis, (motion, gain, limit) in enumerate(((activity.motion_x, .11, 12), (activity.motion_y, .10, 10))):
+            position = positions[axis]
+            target, velocity = self.mouse_target[axis], self.mouse_velocity[axis]
+            delta = motion * gain if active else 0
+            if delta:
+                # A reversal starts from the painted object, not an unfinished reach.
+                if delta * (target - position) < 0:
+                    target = position
+                if delta * velocity < 0:
+                    velocity = 0
+                target = max(-limit, min(limit, target + delta))
+            elif moving:
+                target, velocity = position, 0
+            self.mouse_target[axis] = target
+            # Wait for the paw, then move the object and its contact together.
+            if self.mouse_contact or not active:
+                following, velocity = spring(position, velocity, target, 21, dt)
+                bounded = max(min(position, target), min(max(position, target), following))
+                bounded = max(-limit, min(limit, bounded))
+                if bounded != following:
+                    velocity = 0
+                positions[axis] = bounded
+            self.mouse_velocity[axis] = velocity
+        pose.mouse_dx, pose.mouse_dy = positions
 
     def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0)):
         pose = self.pose
