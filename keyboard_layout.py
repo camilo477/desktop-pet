@@ -16,7 +16,7 @@ class Key:
     def project(u: float, v: float) -> tuple[float, float]:
         # Rotate the keyboard on its own plane before applying floor perspective.
         u, v = 18.45 - u, 4.95 - v
-        return 64 - v * 1.2 + u * (4.9 + v * .16), 151 + v * 6 + u * .035
+        return 70 - v * 1.2 + u * (4.9 + v * .16), 151 + v * 6 + u * .035
 
     @property
     def contact(self) -> tuple[float, float]:

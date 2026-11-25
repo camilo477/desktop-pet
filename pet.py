@@ -68,6 +68,7 @@ class PetWindow(QWidget):
         self.animations = Animations()
         self.last_frame = time.monotonic()
         self.press_position: QPoint | None = None
+        self.head_press: float | None = None
         self.press_origin = QPoint()
         self.dragging = False
         self.system_drag = False
@@ -164,6 +165,7 @@ class PetWindow(QWidget):
         signature = (round(pose.left_x * 2), round(pose.left_y * 2),
                      round(pose.right_x * 2), round(pose.right_y * 2),
                      round(pose.head_x * 20), round(pose.head_y * 20),
+                     round(pose.head_tilt * 3), round(pose.pet * 30),
                      round(pose.ear_left * 2), round(pose.ear_right * 2),
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
                      round(pose.tail * math.cos(pose.tail_phase) * 20),
@@ -202,6 +204,7 @@ class PetWindow(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.press_position = event.globalPosition().toPoint()
             self.press_origin = self.pos()
+            self.head_press = self.art.head_hit(event.position() * (200 / self.width()))
             self.dragging = False
             self.system_drag = False
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -229,7 +232,10 @@ class PetWindow(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.press_position is not None:
             if not self.dragging and not self.paused:
-                self.animations.pet()
+                if self.head_press is not None and self.art.head_hit(event.position() * (200 / self.width())) is not None:
+                    self.animations.pet(self.head_press)
+                else:
+                    self.animations.interact()
             self.finish_drag()
 
     def moveEvent(self, event) -> None:
@@ -240,6 +246,7 @@ class PetWindow(QWidget):
     def finish_drag(self) -> None:
         self.position_timer.stop()
         self.press_position = None
+        self.head_press = None
         self.dragging = False
         self.system_drag = False
         self.setCursor(Qt.CursorShape.OpenHandCursor)

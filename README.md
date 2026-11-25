@@ -12,11 +12,14 @@ activity in a transparent window without taking keyboard focus.
   mouse appears on the viewer's left.
 - Actual key presses, holds and releases on X11, including simultaneous keys.
 - Both paws participate in typing; one can keep using the mouse while the other types.
-- Coordinated eyes, head, torso, ears and flexible tail, at up to 30 FPS.
+- Typing speed follows actual press cadence and reach distance, with continuous
+  redirection instead of queued strokes.
+- The mouse travels across a bounded area with its paw, then stays where it was left.
+- Coordinated eyes, head, whiskers, torso, ears and flexible tail, at up to 30 FPS.
 - Occasional grooming, face washing, yawning, glancing and small posture changes.
 - Gradual relaxation and a tucked sleeping posture with slow breathing and small Zzz.
 - Smooth interruption of grooming and sleep when activity resumes.
-- Dragging, a small reaction when petted, and clicks through empty window areas.
+- Head pats with a brief coordinated squint and lean, dragging, and clicks through empty areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
 
@@ -75,8 +78,10 @@ instance. A private local socket handles shutdown, with a process lock protectin
 startup and recovery after unexpected exits. No HTTP server or background service
 is installed.
 
-Drag the cat with the left mouse button. Click for a small reaction. The
-right-click menu offers **Tamaño** (150, 200 or 300 logical pixels), **Siempre
+Drag the cat with the left mouse button. Click its head for a short pat reaction,
+even with activity reactions disabled. Dragging and clicks elsewhere do not
+trigger a head pat. The right-click menu offers **Tamaño** (150, 200 or 300
+logical pixels), **Siempre
 visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
@@ -131,5 +136,5 @@ even when local interactions work.
 Two paws cannot physically cover every held key. Priority follows reach and
 availability; all recognized keys still show their pressed state. Labels are
 omitted when rendering resolution is too small, and unsupported keys do not
-generate invented strokes. Keyboard layout changes take effect after restarting input reactions;
-switching among existing XKB layout groups is detected while running.
+generate invented strokes. Keyboard layout changes take effect after restarting
+input reactions; switching among existing XKB layout groups is detected while running.

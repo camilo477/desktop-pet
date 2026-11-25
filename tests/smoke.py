@@ -15,7 +15,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
-from animations import Animations, LEFT_REST, RIGHT_REST, SLEEP_AFTER
+from animations import Animations, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
 from keyboard_layout import BY_ID, KEYS
 from main import instance_busy
 from pet import PetWindow, visible_position
@@ -61,6 +61,17 @@ def check_window() -> None:
     pet.set_paused(False)
     QTest.qWait(100)
     assert pet.animations.time > before
+    # Direct head pats work even with global reactions disabled.
+    QTest.mouseClick(pet, Qt.MouseButton.LeftButton, pos=QPoint(101, 76))
+    QTest.qWait(220)
+    assert pet.animations.pose.pet > .9 and pet.animations.pose.blink > .9
+    pat = pet.animations.pet_start
+    QTest.mouseClick(pet, Qt.MouseButton.LeftButton, pos=QPoint(118, 125))
+    assert pet.animations.pet_start == pat
+    QTest.mousePress(pet, Qt.MouseButton.LeftButton, pos=QPoint(101, 76))
+    QTest.mouseMove(pet, QPoint(130, 90), 30)
+    QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=QPoint(130, 90))
+    assert pet.animations.pet_start == pat
     pet.shutdown()
     restored = PetWindow()
     assert not restored.reactions and not restored.paused and not restored.always_on_top
@@ -80,6 +91,8 @@ def check_motion_and_screens() -> None:
     assert BY_ID['P'].contact[0] < BY_ID['A'].contact[0]
     assert BY_ID['Space'].contact[1] < BY_ID['Digit1'].contact[1]
     assert BY_ID['P'].preferred_paw == 0 and BY_ID['A'].preferred_paw == 1
+    _, _, ux, uy, vx, vy = BY_ID['P'].label_basis
+    assert ux < 0 and vy < 0 and ux * vy - uy * vx > 0  # Rotation, without reflection.
     animation = Animations()
     now = 0.0
 
@@ -122,7 +135,7 @@ def check_motion_and_screens() -> None:
     assert pose.mouse == 0 and abs(pose.left_x - LEFT_REST[0]) < .1
 
     # A brief Space survives between frames without a queued text sequence.
-    pose = advance(.25, Activity(keyboard=now, pulses=frozenset({'Space'}), latest=KeyHint('Space', now)))
+    pose = advance(.13, Activity(keyboard=now, pulses=frozenset({'Space'}), latest=KeyHint('Space', now)))
     assert 'Space' in (pose.left_key, pose.right_key) and 'Space' in pose.pressed
     animation.pet()
     assert animation.advance(.09, now).blink > .95
@@ -154,10 +167,13 @@ def check_motion_and_screens() -> None:
     monitor.pointer_moved(100, 100)
     assert monitor.snapshot().mouse == -float('inf')
     monitor.pointer_moved(101, 100)
-    movement = monitor.snapshot().mouse
+    state = monitor.snapshot()
+    movement = state.mouse
+    assert state.motion_x == 1 and state.motion_y == 0
     monitor.pointer_moved(101, 100)
     monitor.pointer_click()
     assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
+    assert monitor.snapshot().motion_x == 0
     monitor.key_down('W', server_time=100)
     initial = monitor.snapshot().latest
     monitor.key_up(BY_ID['W'].scan, server_time=200)
@@ -172,6 +188,12 @@ def check_motion_and_screens() -> None:
     assert 'W' not in state.held and 'W' in state.pulses
     QTest.qWait(370)
     assert not monitor.snapshot().pressed and monitor._latest.identifier is None
+    for identifier in ('A', 'P', 'Space'):
+        monitor.key_down(identifier)
+        monitor.key_up(BY_ID[identifier].scan)
+    QTest.qWait(35)
+    state = monitor.snapshot()
+    assert not state.held and {'A', 'P', 'Space'} <= state.pulses
     monitor.key_down('A')
     monitor.set_enabled(False)
     assert not monitor.snapshot().pressed and not monitor.snapshot().any_held
@@ -189,6 +211,33 @@ def check_instance_lock() -> None:
         assert not instance_busy(path)
 
 
+def check_responsiveness() -> None:
+    for rate in (3, 6, 10, 15):
+        for using_mouse in (False, True):
+            animation = Animations()
+            previous = -1
+            for frame in range(90):
+                now = frame / 30
+                press = int(now * rate + .0001)
+                fresh = press != previous
+                if fresh:
+                    hint = KeyHint('A' if press % 2 else 'P', now)
+                    previous = press
+                pose = animation.advance(1 / 30, now, Activity(
+                    keyboard=hint.stamp, key_interval=1 / rate, latest=hint,
+                    pulses=frozenset({hint.identifier}), mouse=now if using_mouse else -float('inf')))
+                if fresh:
+                    assert hint.identifier in (pose.left_key, pose.right_key)
+                if using_mouse:
+                    assert pose.left_key is None and pose.right_key in (hint.identifier, None)
+                    if animation.mouse_contact:
+                        assert abs(pose.left_x - MOUSE_REST[0] - pose.mouse_dx) < .01
+                        assert abs(pose.left_y - MOUSE_REST[1] - pose.mouse_dy) < .01
+            for frame in range(9):
+                pose = animation.advance(1 / 30, 3 + frame / 30)
+            assert pose.left_key is None and pose.right_key is None and not pose.pressed
+
+
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="desktop-pet-checks-") as directory:
         QCoreApplication.setOrganizationName("desktop-pet-checks")
@@ -198,5 +247,6 @@ if __name__ == "__main__":
         app = QApplication([])
         check_window()
         check_motion_and_screens()
+        check_responsiveness()
         check_instance_lock()
     print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, per-key input, holds, shared paws, grooming, sleep, screens and lock.")

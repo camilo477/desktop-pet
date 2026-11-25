@@ -34,6 +34,8 @@ class Activity:
     keyboard: float = -math.inf
     mouse: float = -math.inf
     click: float = -math.inf
+    key_interval: float = .33
+    # Real pointer displacement since the previous snapshot, in screen pixels.
     motion_x: float = 0.0
     motion_y: float = 0.0
     held: frozenset[str] = frozenset()
@@ -64,6 +66,8 @@ class ActivityMonitor:
         self._pulses = {}
         self._hints = [KeyHint(), KeyHint()]
         self._latest = KeyHint()
+        self._last_press = -math.inf
+        self._motion = [0.0, 0.0]
 
     def set_enabled(self, enabled):
         if enabled == self.enabled:
@@ -186,6 +190,12 @@ class ActivityMonitor:
                     return
             self._down[code] = (identifier, now)
             if identifier is not None:
+                gap = now - self._last_press
+                interval = .33 if gap > .8 else max(1 / 60, min(.5, gap))
+                if interval > self._activity.key_interval and gap <= .8:
+                    interval = (interval + self._activity.key_interval) * .5
+                self._last_press = now
+                self._activity = replace(self._activity, key_interval=interval)
                 self._pulses[identifier] = now + PULSE_SECONDS
                 hint = KeyHint(identifier, now)
                 sector = BY_ID[identifier].preferred_paw
@@ -225,9 +235,13 @@ class ActivityMonitor:
                 self._global_position = position
             if previous is None:
                 return
+            if (local and self.global_input and len(self._listeners) > 1
+                    and self._listeners[1].is_alive() and self._global_position is not None):
+                return
             dx, dy = x - previous[0], y - previous[1]
-            self._activity = replace(self._activity, mouse=time.monotonic(),
-                                     motion_x=math.tanh(dx / 12), motion_y=math.tanh(dy / 12))
+            self._motion[0] = max(-240, min(240, self._motion[0] + dx))
+            self._motion[1] = max(-240, min(240, self._motion[1] + dy))
+            self._activity = replace(self._activity, mouse=time.monotonic())
 
     def pointer_click(self):
         with self._lock:
@@ -264,9 +278,11 @@ class ActivityMonitor:
             self._hints = [hint if now - hint.stamp < HINT_SECONDS else KeyHint() for hint in self._hints]
             if now - self._latest.stamp >= HINT_SECONDS:
                 self._latest = KeyHint()
-            return replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key),
+            result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key),
                            pulses=frozenset(self._pulses), hints=tuple(self._hints), latest=self._latest,
-                           any_held=bool(self._down))
+                           any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1])
+            self._motion[:] = (0.0, 0.0)
+            return result
 
     def _stop_listeners(self):
         listeners, self._listeners = self._listeners, []
@@ -290,4 +306,6 @@ class ActivityMonitor:
             self._clear_keys()
             self._next_reconcile = 0.0
             self._global_position = self._local_position = None
+            self._last_press = -math.inf
+            self._motion[:] = (0.0, 0.0)
         self._stop_listeners()

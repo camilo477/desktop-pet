@@ -9,7 +9,7 @@ from keyboard_layout import BY_ID
 
 LEFT_REST = (91.0, 148.0)
 RIGHT_REST = (115.0, 148.0)
-MOUSE_REST = (34.0, 161.0)
+MOUSE_REST = (40.0, 161.0)
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
@@ -50,6 +50,10 @@ class Pose:
     gaze_y: float = 0.0
     head_x: float = 0.0
     head_y: float = 0.0
+    head_tilt: float = 0.0
+    focus: float = 0.0
+    pet: float = 0.0
+    pet_side: float = 0.0
     ear_left: float = 0.0
     ear_right: float = 0.0
     balance_x: float = 0.0
@@ -86,31 +90,36 @@ class Paw:
     motion_stamp: float = -math.inf
     until: float = -math.inf
     goal: str = 'rest'
-    start: tuple[float, float] | None = None
     target: tuple[float, float] | None = None
     age: float = 1.0
     duration: float = .18
     arc: float = 0.0
+    response: float = 25.0
 
-    def aim(self, goal, point, stamp=0.0):
+    def aim(self, goal, point, stamp=0.0, interval=.33):
         if self.goal != goal or self.motion_stamp != stamp:
-            self.start = self.x, self.y
             distance = math.hypot(point[0] - self.x, point[1] - self.y)
-            self.duration = max(.10, min(.28, distance / 230))
-            self.arc = min(4.5, max(1.3 if goal in BY_ID else 0, distance * .15))
-            self.age = -.025
+            if goal in BY_ID:
+                travel = max(.04, min(.18, interval * .26 + distance / 750))
+                self.response = 3.8 / travel
+                tempo = max(0, min(1, (.33 - interval) / .26))
+                self.duration = mix(.18, .065, tempo)
+                self.arc = mix(1.7, .25, tempo)
+            else:
+                self.response = 25 if goal == 'mouse' else 21
+                self.duration = .22
+                self.arc = min(3, distance * .06) if goal in ('groom', 'mouse') else 0
+            self.age = 0.0
             self.goal, self.motion_stamp = goal, stamp
         self.target = point
 
     def advance(self, dt):
-        if self.start is None or self.target is None:
+        if self.target is None:
             return
         self.age += dt
-        q = smoothstep(self.age / self.duration)
-        x = mix(self.start[0], self.target[0], q)
-        y = mix(self.start[1], self.target[1], q) - math.sin(math.pi * q) * self.arc
-        self.x, self.vx = spring(self.x, self.vx, x, 27, dt)
-        self.y, self.vy = spring(self.y, self.vy, y, 27, dt)
+        lift = math.sin(math.pi * min(1, self.age / self.duration)) * self.arc
+        self.x, self.vx = spring(self.x, self.vx, self.target[0], self.response, dt)
+        self.y, self.vy = spring(self.y, self.vy, self.target[1] - lift, self.response, dt)
 
 
 class Animations:
@@ -129,6 +138,12 @@ class Animations:
         self.ear_start = -10.0
         self.ear_side = 1
         self.mouse_goal = 0.0
+        self.mouse_target = [0.0, 0.0]
+        self.mouse_velocity = [0.0, 0.0]
+        self.mouse_contact = False
+        self.focus_point = [105.0, 160.0]
+        self.head_velocity = [0.0, 0.0, 0.0]
+        self.pet_start = -10.0
         self.sleep_goal = 0.0
         self.next_idle = IDLE_ACTION_AFTER + random.uniform(1, 8)
         self.action_kind = None
@@ -144,8 +159,10 @@ class Animations:
     def interact(self):
         self.touch_pending = True
 
-    def pet(self):
+    def pet(self, side=0.0):
         self.interact()
+        self.pet_start = self.time
+        self.pose.pet_side = max(-1, min(1, side))
         self.blink_start = self.time
         self.next_blink = self.time + random.uniform(3, 6)
         self.tail_start = self.time
@@ -155,6 +172,9 @@ class Animations:
         self.pose.pressed = frozenset()
         self.pose.left_key = self.pose.right_key = None
         self.last_hint = -math.inf
+        self.mouse_contact = False
+        self.mouse_target[:] = (self.pose.mouse_dx, self.pose.mouse_dy)
+        self.mouse_velocity[:] = (0.0, 0.0)
         for paw in self.paws:
             paw.key = None; paw.stamp = -math.inf; paw.until = -math.inf
             paw.goal = 'cleared'; paw.motion_stamp = -math.inf
@@ -193,7 +213,8 @@ class Animations:
             paw = self.paws[existing]
             paw.key = key.identifier
             paw.stamp = hint.stamp
-            paw.until = max(hint.stamp + .34, now + (.45 if self.pose.sleep > .2 else .12))
+            contact = max(.075, min(.18, activity.key_interval * .55))
+            paw.until = max(hint.stamp + contact, now + (.45 if self.pose.sleep > .2 else .04))
             self.last_hint = max(self.last_hint, hint.stamp)
         assigned = {self.paws[i].key for i in available if self.paws[i].key}
         for index in available:
@@ -207,6 +228,10 @@ class Animations:
 
     def _expressions(self, dt, idle, active):
         t, pose = self.time, self.pose
+        age = t - self.pet_start
+        pose.pet = (smoothstep(age / .14) if 0 <= age < .14 else
+                    1.0 if .14 <= age < .30 else
+                    1 - smoothstep((age - .30) / .48) if .30 <= age < .78 else 0.0)
         if t >= self.next_blink:
             self.blink_start = t
             self.next_blink = t + (.38 if random.random() < .1 else random.uniform(3, 7))
@@ -214,6 +239,7 @@ class Animations:
         pose.blink = (smoothstep(age / .075) if 0 <= age < .075 else
                       1.0 if .075 <= age < .105 else
                       1 - smoothstep((age - .105) / .165) if .105 <= age < .27 else 0.0)
+        pose.blink = max(pose.blink, pose.pet * .98)
         if t >= self.next_tail:
             self.tail_start = t; self.next_tail = t + random.uniform(9, 20)
         age = t - self.tail_start
@@ -241,6 +267,20 @@ class Animations:
         pose.tongue = pose.groom * max(0, math.sin(phase * math.tau * 4)) if self.action_kind == 'lick' else 0
         pose.yawn = envelope if self.action_kind == 'yawn' else 0
         return phase, envelope, playing
+
+    def _mouse_motion(self, dt, activity, active):
+        pose = self.pose
+        if active:
+            self.mouse_target[0] = max(-12, min(12, self.mouse_target[0] + activity.motion_x * .11))
+            self.mouse_target[1] = max(-10, min(10, self.mouse_target[1] + activity.motion_y * .10))
+        else:
+            self.mouse_contact = False
+        # The object waits for its paw. Once gripped, they share one spring.
+        if self.mouse_contact or not active:
+            pose.mouse_dx, self.mouse_velocity[0] = spring(
+                pose.mouse_dx, self.mouse_velocity[0], self.mouse_target[0], 21, dt)
+            pose.mouse_dy, self.mouse_velocity[1] = spring(
+                pose.mouse_dy, self.mouse_velocity[1], self.mouse_target[1], 21, dt)
 
     def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0)):
         pose = self.pose
@@ -271,13 +311,13 @@ class Animations:
             pose.blink = 1.0; pose.tail = 0.0
             pose.ear_left = pose.ear_right = 0.0
             pose.gaze_x = pose.gaze_y = pose.head_x = pose.head_y = 0.0
+            self.head_velocity[:] = (0.0, 0.0, 0.0)
             pose.pressed = frozenset()
             return pose
         mouse_active = now - activity.mouse < MOUSE_HOLD
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 8, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 9, dt)
-        pose.mouse_dx = approach(pose.mouse_dx, activity.motion_x * .9 if mouse_active else 0, 7, dt)
-        pose.mouse_dy = approach(pose.mouse_dy, activity.motion_y * .6 if mouse_active else 0, 7, dt)
+        self._mouse_motion(dt, activity, mouse_active)
         age = now - activity.click
         pose.click = math.sin(math.pi * age / .18) if 0 <= age < .18 else 0
         pose.pressed = activity.pressed
@@ -294,24 +334,38 @@ class Animations:
                     target = (86 + math.sin(stroke * math.pi) * 3, 91 - math.sin(stroke * math.pi) * 23)
                 paw.aim('groom', target)
             elif index == MOUSE_PAW and mouse_active:
-                paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .5))
+                paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in BY_ID:
                 point = BY_ID[paw.key].contact
-                paw.aim(paw.key, (point[0], point[1] + .55), paw.stamp)
+                paw.aim(paw.key, (point[0], point[1] + .55), paw.stamp, activity.key_interval)
             else:
                 paw.aim('rest', rest)
             paw.advance(dt)
+            if index == MOUSE_PAW and mouse_active:
+                x, y = MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4
+                if self.mouse_contact or math.hypot(paw.x - x, paw.y - y) < 1.5:
+                    self.mouse_contact = True
+                    paw.x, paw.y = x, y
+                    paw.vx, paw.vy = self.mouse_velocity
         pose.left_x, pose.left_y = self.paws[0].x, self.paws[0].y
         pose.right_x, pose.right_y = self.paws[1].x, self.paws[1].y
         pose.left_key, pose.right_key = self.paws[0].key, self.paws[1].key
         goals = [BY_ID[paw.key].contact for paw in self.paws if paw.key in BY_ID]
         key_point = BY_ID[activity.latest.identifier].contact if activity.latest.identifier in BY_ID else (goals[-1] if goals else None)
+        if key_point:
+            points = [BY_ID[hint.identifier].contact for hint in activity.hints
+                      if hint.identifier in BY_ID and now - hint.stamp < .20]
+            target = tuple(sum(point[axis] for point in points) / len(points) for axis in (0, 1)) if points else key_point
+            tempo = max(0, min(1, (.33 - activity.key_interval) / .26))
+            for axis in (0, 1):
+                self.focus_point[axis] = approach(self.focus_point[axis], target[axis], mix(12, 5, tempo), dt)
+        pose.focus = approach(pose.focus, (0.2 if mouse_active else 1) if key_point else 0, 9, dt)
         if now - activity.mouse < .65:
             look = gaze
             if key_point and activity.held:
-                look = (gaze[0] * .88 + (key_point[0] - 105) / 60 * .12, gaze[1] * .88 + .08)
+                look = (gaze[0] * .88 + (self.focus_point[0] - 105) / 55 * .12, gaze[1] * .88 + .08)
         elif key_point:
-            look = ((key_point[0] - 105) / 60, .7)
+            look = ((self.focus_point[0] - 105) / 55, .95)
         elif playing and self.action_kind == 'look':
             look = (self.look_side * .55 * action, -.05)
         elif pose.groom > .02:
@@ -320,20 +374,26 @@ class Animations:
             look = (0, -pose.yawn * .2)
         else:
             look = (0, .12)
+        look = (mix(look[0], pose.pet_side * .3, pose.pet), mix(look[1], .3, pose.pet))
         if pose.sleep > .4:
             look = (look[0] * (1 - pose.sleep), look[1] * (1 - pose.sleep))
         pose.gaze_x = approach(pose.gaze_x, max(-1, min(1, look[0])), 14, dt)
         pose.gaze_y = approach(pose.gaze_y, max(-1, min(1, look[1])), 14, dt)
-        pose.head_x = approach(pose.head_x, pose.gaze_x, 4, dt)
-        pose.head_y = approach(pose.head_y, pose.gaze_y, 3.5, dt)
+        speed = 6 if pose.focus > .3 else 8
+        pose.head_x, self.head_velocity[0] = spring(pose.head_x, self.head_velocity[0], pose.gaze_x, speed, dt)
+        pose.head_y, self.head_velocity[1] = spring(pose.head_y, self.head_velocity[1], pose.gaze_y, speed, dt)
+        tilt = pose.head_x * 3 + pose.pet_side * pose.pet * 7
+        if playing and self.action_kind == 'look':
+            tilt += self.look_side * action * 2
+        pose.head_tilt, self.head_velocity[2] = spring(pose.head_tilt, self.head_velocity[2], tilt, 11, dt)
         if key_point:
-            target_x = max(-10, min(9, (key_point[0] - 105) * .19))
-            target_y = max(0, min(9, (key_point[1] - 146) * .38))
+            target_x = max(-10, min(9, (self.focus_point[0] - 105) * .21))
+            target_y = max(2, min(9, (self.focus_point[1] - 150) * .34 + pose.focus * 2))
             if mouse_active:
-                target_x = target_x * .45 - 4.5
-                target_y = max(5, target_y)
+                target_x = target_x * .4 - 7 + pose.mouse_dx * .25
+                target_y = max(5, target_y) + pose.mouse_dy * .10
         else:
-            target_x, target_y = (-7.5, 4) if mouse_active else (0, 0)
+            target_x, target_y = (-9 + pose.mouse_dx * .3, 5 + pose.mouse_dy * .12) if mouse_active else (0, 0)
         if playing and self.action_kind == 'shift':
             target_x += self.look_side * action * 2
         if pose.groom > 0:
