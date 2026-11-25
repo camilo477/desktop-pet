@@ -84,9 +84,11 @@ def check_motion_and_screens() -> None:
     monitor = ActivityMonitor(False)
     monitor.set_enabled(True)
     monitor.pointer_moved(100, 100)
+    assert monitor.snapshot().mouse == -float("inf")
+    monitor.pointer_moved(101, 100)
     movement = monitor.snapshot().mouse
-    monitor.pointer_moved(100, 100)
-    monitor.pointer_activity(click=True)
+    monitor.pointer_moved(101, 100)
+    monitor.pointer_click()
     assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
     monitor.stop()
     animation = Animations()

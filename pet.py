@@ -127,9 +127,11 @@ class PetWindow(QWidget):
         if self.reactions:
             if self.global_input:
                 cursor = QCursor.pos() - self.pos()
-                area = self.screen().geometry()
-                gaze = (math.tanh((cursor.x() - self.width() * 0.47) / (area.width() * 0.28)),
-                        math.tanh((cursor.y() - self.height() * 0.30) / (area.height() * 0.30)))
+                screen = self.screen() or QApplication.primaryScreen()
+                if screen:
+                    area = screen.geometry()
+                    gaze = (math.tanh((cursor.x() - self.width() * 0.47) / max(1, area.width() * 0.28)),
+                            math.tanh((cursor.y() - self.height() * 0.255) / max(1, area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
         self.animations.advance(min(now - self.last_frame, 0.1), now,
@@ -194,15 +196,15 @@ class PetWindow(QWidget):
             self.dragging = False
             self.system_drag = False
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self.activity.pointer_activity(click=True)
+            self.activity.pointer_click()
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         position = event.globalPosition()
         self.activity.pointer_moved(position.x(), position.y(), local=True)
         if self.reactions and not self.paused:
-            self.local_gaze = ((event.position().x() / self.width() - 0.48) * 2.0,
-                               (event.position().y() / self.height() - 0.45) * 2.0)
+            self.local_gaze = ((event.position().x() / self.width() - 0.47) * 2.0,
+                               (event.position().y() / self.height() - 0.255) * 2.0)
         if self.press_position is None:
             return
         delta = event.globalPosition().toPoint() - self.press_position

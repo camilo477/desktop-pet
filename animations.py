@@ -115,11 +115,13 @@ class Animations:
         mouse_active = now - activity.mouse < MOUSE_HOLD
         pose.typing = approach(pose.typing, float(keyboard_active), 12.0 if keyboard_active else 6.0, dt)
         # Two filters give the transfer a soft start and finish, including on interruption.
-        self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 10.0, dt)
-        pose.mouse = approach(pose.mouse, self.mouse_goal, 11.0, dt)
+        self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 8.0, dt)
+        pose.mouse = approach(pose.mouse, self.mouse_goal, 9.0, dt)
         reach = smoothstep(pose.mouse)
-        pose.mouse_dx = approach(pose.mouse_dx, activity.motion_x * reach if mouse_active else 0.0, 6.0, dt)
-        pose.mouse_dy = approach(pose.mouse_dy, activity.motion_y * reach * 0.65 if mouse_active else 0.0, 6.0, dt)
+        motion_x = (activity.motion_x + math.sin(t * 6.1) * .26) * reach if mouse_active else 0.0
+        motion_y = (activity.motion_y * .65 + math.sin(t * 4.9 + .9) * .16) * reach if mouse_active else 0.0
+        pose.mouse_dx = approach(pose.mouse_dx, motion_x, 6.0, dt)
+        pose.mouse_dy = approach(pose.mouse_dy, motion_y, 6.0, dt)
         click_age = now - activity.click
         pose.click = math.sin(math.pi * click_age / 0.18) if 0 <= click_age < 0.18 else 0.0
 

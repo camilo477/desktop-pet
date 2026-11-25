@@ -5,9 +5,8 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
 from animations import Pose, mix, smoothstep
@@ -110,17 +109,26 @@ class CatArt:
 
     def _body(self, painter: QPainter, pose: Pose) -> None:
         painter.save()
-        painter.translate(94 + pose.lean, 162)
-        painter.scale(1 + pose.breath * .006, 1 + pose.breath * .011)
-        painter.translate(-94, -162)
+        painter.setWorldTransform(self.body_transform(pose), combine=True)
         self.layer(painter, "body")
         painter.restore()
 
     @staticmethod
+    def body_transform(pose: Pose) -> QTransform:
+        reach = smoothstep(pose.mouse)
+        transform = QTransform()
+        transform.translate(94 + pose.lean, 162)
+        transform.scale(1 + pose.breath * .006 - reach * .015, 1 + pose.breath * .011)
+        transform.shear(-reach * .018, 0)
+        transform.translate(-94, -162)
+        return transform
+
+    @staticmethod
     def shoulder(side: int, pose: Pose) -> tuple[float, float]:
         x = 79.5 if side < 0 else 109.5 + smoothstep(pose.mouse) * 3.0
-        return (94 + pose.lean + (x - 94) * (1 + pose.breath * .006),
-                162 + (96 - 162) * (1 + pose.breath * .011))
+        lift = pose.left_paw if side < 0 else pose.right_paw
+        point = CatArt.body_transform(pose).map(QPointF(x, 96 - lift * .18))
+        return point.x(), point.y()
 
     @staticmethod
     def elbow(shoulder: tuple[float, float], wrist: tuple[float, float],
@@ -198,8 +206,9 @@ class CatArt:
         width = 10 * (1 - max(0.0, side * yaw) * .26 + max(0.0, -side * yaw) * .025)
         cx = 94 + side * 14 * (1 - abs(yaw) * .13) + yaw * 7.0
         cy = 64 + pitch * 3.8 + side * yaw * .65
-        top = mix(-10.0, 1.65, pose.blink)
-        bottom = mix(10.0, 1.65, pose.blink)
+        height = 12.0 * (1 - pitch * .08)
+        top = mix(-height, 1.65, pose.blink)
+        bottom = mix(height, 1.65, pose.blink)
         # The upper lid travels further than the lower lid; the aperture itself closes.
         aperture = QPainterPath()
         aperture.moveTo(cx - width, cy)
@@ -210,7 +219,7 @@ class CatArt:
         painter.setBrush(QColor("#c2d196"))
         painter.drawPath(aperture)
         painter.save()
-        painter.setClipPath(aperture)
+        painter.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
         px = cx + (pose.gaze_x - yaw * .32) * 2.3
         py = cy + (pose.gaze_y - pitch * .3) * 1.5
         pupil = QPainterPath()
@@ -235,8 +244,8 @@ class CatArt:
 
     def _head(self, painter: QPainter, pose: Pose) -> None:
         painter.save()
-        painter.translate(9.4 + pose.lean * .45, -2 - pose.breath * .65)
-        painter.scale(.9, .9)
+        painter.translate(9.4 + pose.lean * .45, 3.1 - pose.breath * .65)
+        painter.scale(.9, .74)
         yaw, pitch = pose.head_x, pose.head_y
         for side, name, flick in ((-1, "ear-left", pose.ear_left), (1, "ear-right", pose.ear_right)):
             x, y = (73, 46) if side < 0 else (117, 46)
@@ -268,7 +277,10 @@ class CatArt:
             if yaw < 0:
                 side_plane = [(188 - x, y) for x, y in side_plane]
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#2c343d"))
+            amount = smoothstep(abs(yaw))
+            painter.setBrush(QColor(round(mix(53, 44, amount)),
+                                   round(mix(62, 52, amount)),
+                                   round(mix(71, 61, amount))))
             painter.drawPath(curve(side_plane))
         chin = [(94 + (x - 94) * (1 - abs(yaw) * .1) + yaw * 8,
                  y + pitch * 3.5) for x, y in self.chin]
@@ -279,8 +291,10 @@ class CatArt:
         self._eye(painter, pose, -1)
         self._eye(painter, pose, 1)
         painter.save()
-        painter.translate(94 + yaw * 9, 82 + pitch * 4.4)
-        painter.scale(1 - abs(yaw) * .18, 1 - abs(pitch) * .06)
+        painter.setClipPath(silhouette)
+        muzzle_y = pitch * (4.0 if pitch >= 0 else 6.0)
+        painter.translate(94 + yaw * 9, 82 + muzzle_y)
+        painter.scale(1 - abs(yaw) * .18, 1 - pitch * .10)
         painter.translate(-94, -82)
         self.layer(painter, "muzzle")
         painter.restore()

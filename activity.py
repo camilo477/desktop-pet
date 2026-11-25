@@ -1,4 +1,4 @@
-"""Optional X11 input activity, reduced immediately to bounded timestamps."""
+"""Optional X11 activity, retaining only current timing and pointer motion."""
 
 from dataclasses import dataclass
 import math
@@ -82,16 +82,17 @@ class ActivityMonitor:
     def _click(self, x, y, button, pressed) -> None:
         del x, y, button
         if pressed:
-            self.pointer_activity(click=True)
+            self.pointer_click()
 
     def _scroll(self, x, y, dx, dy) -> None:
         del x, y, dx, dy
-        self.pointer_activity(click=True)
+        self.pointer_click()
 
     def pointer_moved(self, x: float, y: float, local: bool = False) -> None:
         with self._lock:
             if not self.enabled:
                 return
+            # Qt and pynput may report different coordinate scales on high-DPI screens.
             previous = self._local_position if local else self._global_position
             position = (x, y)
             if previous == position:
@@ -100,14 +101,17 @@ class ActivityMonitor:
                 self._local_position = position
             else:
                 self._global_position = position
-            dx, dy = (x - previous[0], y - previous[1]) if previous else (0.0, 0.0)
+            if previous is None:
+                # A first position establishes a baseline, not evidence of movement.
+                return
+            dx, dy = x - previous[0], y - previous[1]
             old = self._activity
             self._activity = Activity(old.keyboard, time.monotonic(), old.click, old.key_interval,
                                       math.tanh(dx / 12.0), math.tanh(dy / 12.0))
 
-    def pointer_activity(self, click: bool = False) -> None:
+    def pointer_click(self) -> None:
         with self._lock:
-            if self.enabled and click:
+            if self.enabled:
                 old = self._activity
                 self._activity = Activity(old.keyboard, old.mouse, time.monotonic(),
                                           old.key_interval, old.motion_x, old.motion_y)
