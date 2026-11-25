@@ -115,6 +115,9 @@ class PetWindow(QWidget):
 
     def refresh_activity(self) -> None:
         self.activity.set_enabled(self.reactions and not self.paused)
+        if not self.reactions or self.paused:
+            self.animations.clear_input()
+            self.render_frame()
         self.last_frame = time.monotonic()
         if self.paused:
             self.timer.stop()
@@ -123,19 +126,23 @@ class PetWindow(QWidget):
 
     def tick(self) -> None:
         now = time.monotonic()
+        activity = self.activity.snapshot() if self.reactions else Activity()
+        self.art.set_layout(activity.layout)
         gaze = (0.0, 0.0)
-        if self.reactions:
+        if self.reactions and now - activity.mouse < .65:
             if self.global_input:
                 cursor = QCursor.pos() - self.pos()
                 screen = self.screen() or QApplication.primaryScreen()
                 if screen:
                     area = screen.geometry()
-                    gaze = (math.tanh((cursor.x() - self.width() * 0.47) / max(1, area.width() * 0.28)),
-                            math.tanh((cursor.y() - self.height() * 0.255) / max(1, area.height() * 0.30)))
+                    gaze = (math.tanh((cursor.x() - self.width() * 0.505) / max(1, area.width() * 0.28)),
+                            math.tanh((cursor.y() - self.height() * 0.38) / max(1, area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
-        self.animations.advance(min(now - self.last_frame, 0.1), now,
-                                self.activity.snapshot() if self.reactions else Activity(), gaze)
+        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze)
+        interval = 100 if self.animations.sleeping else 34
+        if self.timer.interval() != interval:
+            self.timer.setInterval(interval)
         self.last_frame = now
         self.render_frame()
 
@@ -159,7 +166,9 @@ class PetWindow(QWidget):
                      round(pose.head_x * 20), round(pose.head_y * 20),
                      round(pose.ear_left * 2), round(pose.ear_right * 2),
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
-                     round(pose.tail * math.cos(pose.tail_phase) * 20))
+                     round(pose.tail * math.cos(pose.tail_phase) * 20),
+                     round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
+                     round(pose.groom * 20), round(pose.yawn * 20))
         if handle and (force_mask or signature != self.mask_signature or now - self.mask_time >= 0.1):
             # Native masks use logical pixels; keep antialiased edges inside the mask.
             image = self.frame.toImage().scaled(self.size())
@@ -197,14 +206,16 @@ class PetWindow(QWidget):
             self.system_drag = False
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.activity.pointer_click()
+            if not self.paused:
+                self.animations.interact()
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         position = event.globalPosition()
         self.activity.pointer_moved(position.x(), position.y(), local=True)
         if self.reactions and not self.paused:
-            self.local_gaze = ((event.position().x() / self.width() - 0.47) * 2.0,
-                               (event.position().y() / self.height() - 0.255) * 2.0)
+            self.local_gaze = ((event.position().x() / self.width() - 0.505) * 2.0,
+                               (event.position().y() / self.height() - 0.38) * 2.0)
         if self.press_position is None:
             return
         delta = event.globalPosition().toPoint() - self.press_position
@@ -302,6 +313,8 @@ class PetWindow(QWidget):
     def contextMenuEvent(self, event) -> None:
         if self._menu is not None:
             return
+        if not self.paused:
+            self.animations.interact()
         self._menu = self.build_menu()
         self._menu.aboutToHide.connect(self.clear_menu)
         self._menu.popup(event.globalPos())

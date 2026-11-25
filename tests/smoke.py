@@ -14,8 +14,9 @@ from PySide6.QtGui import QCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from activity import Activity, ActivityMonitor
-from animations import Animations
+from activity import Activity, ActivityMonitor, KeyHint
+from animations import Animations, LEFT_REST, RIGHT_REST, SLEEP_AFTER
+from keyboard_layout import BY_ID, KEYS
 from main import instance_busy
 from pet import PetWindow, visible_position
 
@@ -70,40 +71,96 @@ def check_motion_and_screens() -> None:
     areas = [QRect(-1920, 0, 1920, 1080), QRect(0, 0, 1920, 1080)]
     assert visible_position(QPoint(5000, 5000), QSize(200, 200), areas) == QPoint(1720, 880)
     assert visible_position(QPoint(-1800, 300), QSize(200, 200), areas) == QPoint(-1800, 300)
+    assert len({key.identifier for key in KEYS}) == len(KEYS)
+    assert len({key.scan for key in KEYS}) == len(KEYS)
     animation = Animations()
-    for _ in range(30):
-        pose = animation.advance(1 / 30, 2.0, Activity(keyboard=2.0), (4.0, -4.0))
-    assert pose.typing > 0.9 and pose.left_paw > 0
+    now = 0.0
+
+    def advance(seconds, activity=Activity(), gaze=(0, 0)):
+        nonlocal now
+        for _ in range(round(seconds * 30)):
+            now += 1 / 30
+            pose = animation.advance(1 / 30, now, activity, gaze)
+        return pose
+
+    # A ten-second hold stays planted; autorepeat adds no motion goals.
+    hold = Activity(keyboard=0, held=frozenset({'W'}), latest=KeyHint('W', 0))
+    pose = advance(10, hold)
+    assert pose.left_key == 'W' and 'W' in pose.pressed
+    assert abs(pose.left_x - BY_ID['W'].contact[0]) < .1
+    assert abs(pose.left_y - BY_ID['W'].contact[1] - .55) < .1
+    assert animation.last_activity == now and pose.sleep == 0
+    pose = advance(1)
+    assert not pose.pressed and abs(pose.left_y - LEFT_REST[1]) < .1
+
+    # Hand allocation follows location and preserves a held key where possible.
+    stamp = now
+    chord = Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}),
+                     hints=(KeyHint('A', now), KeyHint('P', now + .001)))
+    pose = advance(1, chord)
+    assert {pose.left_key, pose.right_key} == {'A', 'P'}
+    assert pose.pressed == chord.held
+    pose = advance(1, Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}), mouse=now))
+    # Only actual motion reserves the mouse paw; the other can reach P.
+    pose = advance(.4, Activity(keyboard=now, mouse=now, held=frozenset({'P'}), latest=KeyHint('P', now)), (1, -1))
+    assert pose.left_key == 'P' and pose.right_key is None
+    assert pose.right_x > 150 and pose.left_x > 85
     assert -1 <= pose.gaze_x <= 1 and -1 <= pose.gaze_y <= 1
-    for _ in range(90):
-        pose = animation.advance(1 / 30)
-    assert pose.typing < 0.01 and pose.left_paw < 0.01
+    pose = advance(1.4)
+    assert pose.mouse < .01 and abs(pose.right_x - RIGHT_REST[0]) < .1
+    assert abs(pose.head_x) < .1  # Attention leaves a stationary cursor.
+    pose = advance(.3, Activity(click=now))
+    assert pose.mouse == 0 and abs(pose.right_x - RIGHT_REST[0]) < .1
+
+    # A brief Space survives between frames without a queued text sequence.
+    pose = advance(.25, Activity(keyboard=now, pulses=frozenset({'Space'}), latest=KeyHint('Space', now)))
+    assert 'Space' in (pose.left_key, pose.right_key) and 'Space' in pose.pressed
     animation.pet()
-    assert animation.advance(0.09).blink > 0.95
+    assert animation.advance(.09, now).blink > .95
+
+    animation.last_activity = now - 30
+    animation.start_idle('lick')
+    pose = advance(1.3)
+    assert pose.groom > .5 and pose.left_y < 112
+    pose = advance(.5, Activity(keyboard=now, held=frozenset({'P'}), latest=KeyHint('P', now)))
+    assert pose.groom < .01 and 'P' in (pose.left_key, pose.right_key)
+    # Accelerate only the inactivity clock, while advancing full motion frames.
+    now += SLEEP_AFTER + 1
+    pose = advance(5)
+    assert animation.sleeping and pose.zzz > .99 and pose.left_y > 140
+    pose = advance(.6, Activity(keyboard=now, held=frozenset({'A'}), latest=KeyHint('A', now)))
+    assert pose.sleep < .04 and pose.zzz < .03 and 'A' in pose.pressed
+    animation.clear_input()
+    assert not pose.pressed and pose.left_key is None and pose.right_key is None
 
     monitor = ActivityMonitor(False)
     monitor.set_enabled(True)
     monitor.pointer_moved(100, 100)
-    assert monitor.snapshot().mouse == -float("inf")
+    assert monitor.snapshot().mouse == -float('inf')
     monitor.pointer_moved(101, 100)
     movement = monitor.snapshot().mouse
     monitor.pointer_moved(101, 100)
     monitor.pointer_click()
     assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
+    monitor.key_down('W', server_time=100)
+    initial = monitor.snapshot().latest
+    monitor.key_up(BY_ID['W'].scan, server_time=200)
+    monitor.key_down('W', server_time=200)
+    assert monitor.snapshot().latest == initial and 'W' in monitor.snapshot().held
+    monitor.key_up(BY_ID['W'].scan, server_time=300)
+    monitor.key_down('W', server_time=301)
+    assert monitor.snapshot().latest.stamp > initial.stamp
+    monitor.key_up(BY_ID['W'].scan)
+    QTest.qWait(35)
+    state = monitor.snapshot()
+    assert 'W' not in state.held and 'W' in state.pulses
+    QTest.qWait(370)
+    assert not monitor.snapshot().pressed and monitor._latest.identifier is None
+    monitor.key_down('A')
+    monitor.set_enabled(False)
+    assert not monitor.snapshot().pressed and not monitor.snapshot().any_held
+    assert not monitor._down and not monitor._releases and not monitor._pulses
     monitor.stop()
-    animation = Animations()
-    for frame in range(1, 31):
-        pose = animation.advance(1 / 30, frame / 30, Activity(click=frame / 30), (1, -1))
-    assert pose.mouse == 0 and pose.right_x == 108
-    for frame in range(31, 61):
-        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=frame / 30))
-    assert pose.mouse > .99 and pose.right_x > 155
-    for frame in range(61, 73):
-        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=2.0))
-    assert pose.mouse > .99
-    for frame in range(73, 121):
-        pose = animation.advance(1 / 30, frame / 30, Activity(mouse=2.0))
-    assert pose.mouse < .01 and abs(pose.right_x - 108) < .1
 
 
 def check_instance_lock() -> None:
@@ -126,4 +183,4 @@ if __name__ == "__main__":
         check_window()
         check_motion_and_screens()
         check_instance_lock()
-    print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, animations, screens and lock.")
+    print("PASS: rendering, mask, sizes, pause, drag, menu, preferences, per-key input, holds, shared paws, grooming, sleep, screens and lock.")

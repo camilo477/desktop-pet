@@ -1,27 +1,29 @@
 # Miga · Desktop Pet
 
-An original charcoal cat with a compact keyboard and mouse, built for Linux
-with Python, PySide6 and SVG. The transparent window stays above other windows
-without taking keyboard focus. Miga breathes, blinks and occasionally flicks
-its ears and flexible tail.
-
-![Miga with a keyboard and mouse](assets/cat/miga.svg)
+An original charcoal cat sitting on an invisible floor with a small keyboard
+and mouse. Built for Linux with Python, PySide6 and SVG, Miga accompanies your
+activity in a transparent window without taking keyboard focus.
 
 ## Features
 
-- Original layered SVG artwork, with smooth independent animations at up to 30 FPS.
-- Articulated forelegs, varied typing movements and smooth keyboard/mouse transfers.
-- Both paws rest at the keyboard; real pointer motion reaches for the mouse,
-  then the paw returns after a short idle interval.
-- Perspective-aware head shapes, coordinated facial features and quicker pupil tracking.
-- Closing eyelids, subtle torso breathing and deformation along the tail.
+- Minimal flat silhouettes, a seated feline posture and organically bending forelegs.
+- A QWERTY keyboard whose key shapes also define the paws' contact targets.
+- Actual key presses, holds and releases on X11, including simultaneous keys.
+- Both paws participate in typing; one can keep using the mouse while the other types.
+- Coordinated eyes, head, torso, ears and flexible tail, at up to 30 FPS.
+- Occasional grooming, face washing, yawning, glancing and small posture changes.
+- Gradual relaxation and a tucked sleeping posture with slow breathing and small Zzz.
+- Smooth interruption of grooming and sleep when activity resumes.
 - Dragging, a small reaction when petted, and clicks through empty window areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
 
-Input callbacks immediately discard key values. Only activity timing and the
-current pointer position and motion are kept in memory. No input history,
-logs, telemetry or internet connections are used.
+Input processing is entirely local. It keeps only currently held physical key
+identifiers, brief visual markers, the latest paw targets and activity timestamps
+in memory. It does not reconstruct text, keep a typing history, write input logs,
+send telemetry or connect to the internet. **Reaccionar a actividad** disables
+input listeners and immediately clears input state. Pausing also stops listeners
+and clears held keys.
 
 ## Technologies
 
@@ -78,20 +80,36 @@ animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
 Pausing stops the animation timer and input listeners while keeping dragging
 and menu controls available. Disabling activity reactions stops global input
-listeners; breathing, blinking and occasional tail movement continue.
+listeners; normal idle behaviors continue.
 
-The mouse hand returns to the keyboard after approximately 500 ms without real
+The mouse paw returns to the keyboard after approximately 500 ms without real
 pointer movement, followed by a smooth transfer. A stationary pointer or a
-click alone does not keep the hand on the mouse. Typing can continue with one
-paw while the other uses the mouse.
+click alone does not keep the paw on the mouse or keep the cat watching the
+cursor. When typing without pointer motion, attention moves to the keyboard.
+
+Held keys stay visibly pressed without repeating the paw's stroke. Fast taps
+leave a brief visual mark; rapid typing updates current paw targets rather than
+queuing a delayed sequence. All recognized pressed keys are shown even when
+there are more held keys than available paws.
+
+After 15 seconds without observed activity, occasional idle actions can begin.
+After one minute Miga gradually relaxes, and after three minutes it settles into
+sleep. A held key keeps it awake. Input or a direct click wakes it smoothly.
+Sleep runs at about 10 FPS; pausing stops rendering entirely. These intervals
+are simple constants in `animations.py`.
 
 ## Linux compatibility
 
-- **X11:** global activity uses pynput's X backend, with Qt cursor tracking.
-  A compositor and the X server's input recording support are needed.
+- **X11:** global input uses pynput's pinned X backend, with Qt cursor tracking.
+  A compositor and the X server's input recording support are needed. Physical
+  QWERTY positions are used for US, UK, Spanish and Latin American layouts;
+  Spanish layouts display Ñ. Other layouts use an unshifted key mapping where
+  a corresponding represented key can be identified.
 - **Wayland, including XWayland sessions:** global input listeners are disabled.
   Local pointer reactions, idle animations, clicks and menu controls remain
   available. Native Wayland dragging uses the compositor's move request.
+  Relaxation and sleep use only activity actually observed by the application;
+  they do not measure the computer's global inactivity on Wayland.
 - Window placement, position restoration, click-through masking, hiding from
   task switchers and keeping the pet above other applications depend on the
   compositor. In particular, native Wayland may ignore placement and topmost
@@ -107,3 +125,9 @@ position restoration. Global keyboard and pointer tracking are unavailable in
 Wayland sessions; local pointer tracking still works while the pointer is over
 Miga. Without an X11 input-recording facility, global activity can be unavailable
 even when local interactions work.
+
+Two paws cannot physically cover every held key. Priority follows reach and
+availability; all recognized keys still show their pressed state. Labels are
+omitted at the smallest size, and unsupported keys do not generate invented
+strokes. Keyboard layout changes take effect after restarting input reactions;
+switching among existing XKB layout groups is detected while running.
