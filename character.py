@@ -124,31 +124,35 @@ class CatArt:
 
     def _body(self, p, pose):
         sleep = smoothstep(pose.sleep)
+        p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
+        if sleep > .999:
+            p.save(); p.translate(92, 153); p.scale(1, 1 - pose.breath * .003)
+            p.translate(-92, -153); p.drawPath(self.sleep_body); p.restore()
+            return
         points = self.blended('body', 'body-sleep', sleep)
         warped = []
         for x, y in points:
             weight = max(0, min(1, (153 - y) / 65))
             warped.append((x + pose.balance_x * weight,
                            y + (pose.balance_y - pose.breath * .65 + pose.relax * 2) * weight))
-        p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
-        if sleep > .999:
-            p.save(); p.translate(92, 153); p.scale(1, 1 - pose.breath * .003)
-            p.translate(-92, -153); p.drawPath(self.sleep_body); p.restore()
-        else:
-            body = curve(warped)
-            if sleep < .99:
-                gap = QPainterPath()
-                middle = 101 + pose.balance_x * .2
-                width = 5 * (1 - sleep)
-                gap.moveTo(middle - width, 155)
-                gap.cubicTo(middle - width * .2, 146, middle - width, 131, middle, 126)
-                gap.cubicTo(middle + width, 131, middle + width * .2, 146, middle + width, 155)
-                gap.closeSubpath()
-                body = body.subtracted(gap)
-            p.drawPath(body)
+        body = curve(warped)
+        if sleep < .99:
+            gap = QPainterPath()
+            middle = 101 + pose.balance_x * .2
+            width = 5 * (1 - sleep)
+            gap.moveTo(middle - width, 155)
+            gap.cubicTo(middle - width * .2, 146, middle - width, 131, middle, 126)
+            gap.cubicTo(middle + width, 131, middle + width * .2, 146, middle + width, 155)
+            gap.closeSubpath()
+            body = body.subtracted(gap)
+        p.drawPath(body)
 
     def _tail(self, p, pose):
         sleep = smoothstep(pose.sleep)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
+        if sleep > .999:
+            p.drawPath(self.sleep_tail)
+            return
         points = self.blended('tail', 'tail-sleep', sleep)
         warped = []
         count = len(points)
@@ -157,8 +161,7 @@ class CatArt:
             amplitude = (pose.tail * 1.6 + abs(pose.balance_velocity) * .012) * (1 - sleep)
             warped.append((x + math.sin(pose.tail_phase - weight * 2) * amplitude * weight,
                            y + math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55))
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
-        p.drawPath(self.sleep_tail if sleep > .999 else curve(warped))
+        p.drawPath(curve(warped))
 
     @staticmethod
     def shoulder(side, pose):
@@ -167,7 +170,7 @@ class CatArt:
                 mix(118, 139, sleep) + pose.balance_y * .8 - pose.breath * .4)
 
     @staticmethod
-    def elbow(shoulder, wrist, side, reach=0):
+    def elbow(shoulder, wrist, side):
         sx, sy = shoulder; dx, dy = wrist[0] - sx, wrist[1] - sy
         distance = max(.001, math.hypot(dx, dy))
         upper, lower = 25.0, 28.0
@@ -201,15 +204,20 @@ class CatArt:
                              ex + tx * 4 + enx, ey + ty * 4 + eny, ex + enx, ey + eny)
                 path.cubicTo(ex - tx * 4 + enx, ey - ty * 4 + eny,
                              sx + ax * 9 + snx, sy + ay * 9 + sny, sx + snx, sy + sny)
-        path.closeSubpath(); p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur); p.drawPath(path)
+        nx, ny = normals[0]
+        path.cubicTo(sx - ax * 5 - nx * 5.2, sy - ay * 5 - ny * 5.2,
+                     sx - ax * 5 + nx * 5.2, sy - ay * 5 + ny * 5.2,
+                     sx + nx * 5.2, sy + ny * 5.2)
+        path.closeSubpath(); p.setPen(Qt.PenStyle.NoPen)
+        # A slight flat tone keeps a raised leg readable against its chest.
+        tone = round(pose.groom * 6) if side < 0 else 0
+        p.setBrush(QColor(48 + tone, 54 + tone, 59 + tone) if tone else self.fur)
+        p.drawPath(path)
 
     def _head(self, p, pose):
         s = smoothstep(pose.sleep)
         yaw, pitch = pose.head_x * (1 - s), pose.head_y * (1 - s)
         dx = pose.balance_x * .8; dy = pose.balance_y * .65 - pose.breath * .3 + pose.groom * 3
-        points = self.blended('head-shape', 'head-sleep', s)
-        points = [(mix(101, 109, s) + (x - mix(101, 109, s)) * (1 - abs(yaw) * .08) + yaw * 1.5 + dx,
-                   y + pitch * 1.2 + dy) for x, y in points]
         for side, name, anchor in ((-1, 'ear-left', (82, 57)), (1, 'ear-right', (125, 57))):
             x = mix(anchor[0], 91 if side < 0 else 128, s)
             y = mix(anchor[1], 120, s)
@@ -217,7 +225,14 @@ class CatArt:
             p.rotate((pose.ear_left if side < 0 else pose.ear_right) + side * s * 27 - yaw * 3)
             p.scale(1 - max(0, side * yaw) * .22, 1 - s * .25)
             p.translate(-anchor[0], -anchor[1]); self.layer(p, name); p.restore()
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur); p.drawPath(curve(points))
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.fur)
+        if s > .999:
+            p.save(); p.translate(dx, dy); p.drawPath(self.sleep_head); p.restore()
+        else:
+            points = self.blended('head-shape', 'head-sleep', s)
+            points = [(mix(101, 109, s) + (x - mix(101, 109, s)) * (1 - abs(yaw) * .08) + yaw * 1.5 + dx,
+                       y + pitch * 1.2 + dy) for x, y in points]
+            p.drawPath(curve(points))
         blink = max(pose.blink, smoothstep((s - .35) / .65), pose.yawn * .92,
                     pose.groom * (.65 if pose.action == 'wash' else .2))
         for side in (-1, 1):
@@ -266,9 +281,14 @@ class CatArt:
             if key.identifier in pose.pressed:
                 self.draw_key(p, key, True, self.cache_scale)
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse'); p.restore()
+        washing_face = pose.action == 'wash' and pose.groom > .01
         if pose.sleep < .995:
-            self._arm(p, pose, -1); self._arm(p, pose, 1)
+            if not washing_face:
+                self._arm(p, pose, -1)
+            self._arm(p, pose, 1)
         self._head(p, pose)
+        if washing_face:
+            self._arm(p, pose, -1)
         for side in (-1, 1):
             x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
             p.save(); p.translate(x, y); p.rotate(-pose.mouse * 12 if side > 0 else 0)

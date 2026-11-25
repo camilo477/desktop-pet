@@ -128,6 +128,6 @@ even when local interactions work.
 
 Two paws cannot physically cover every held key. Priority follows reach and
 availability; all recognized keys still show their pressed state. Labels are
-omitted at the smallest size, and unsupported keys do not generate invented
-strokes. Keyboard layout changes take effect after restarting input reactions;
+omitted when rendering resolution is too small, and unsupported keys do not
+generate invented strokes. Keyboard layout changes take effect after restarting input reactions;
 switching among existing XKB layout groups is detected while running.

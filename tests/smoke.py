@@ -40,7 +40,11 @@ def check_window() -> None:
         pet.set_size(size)
         assert pet.size() == QSize(size, size)
         assert pet.frame.toImage().pixelColor(0, 0).alpha() == 0
+    pet.activity.key_down('A')
+    pet.animations.advance(1 / 30, 1, pet.activity.snapshot())
+    assert 'A' in pet.animations.pose.pressed
     pet.set_paused(True)
+    assert not pet.animations.pose.pressed and not pet.activity.snapshot().held
     before = pet.animations.time
     QTest.qWait(100)
     assert pet.animations.time == before and not pet.timer.isActive()
@@ -90,11 +94,13 @@ def check_motion_and_screens() -> None:
     assert abs(pose.left_x - BY_ID['W'].contact[0]) < .1
     assert abs(pose.left_y - BY_ID['W'].contact[1] - .55) < .1
     assert animation.last_activity == now and pose.sleep == 0
+    now += SLEEP_AFTER + 1
+    pose = animation.advance(1 / 30, now, hold)
+    assert animation.last_activity == now and pose.sleep == 0 and pose.left_key == 'W'
     pose = advance(1)
     assert not pose.pressed and abs(pose.left_y - LEFT_REST[1]) < .1
 
     # Hand allocation follows location and preserves a held key where possible.
-    stamp = now
     chord = Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}),
                      hints=(KeyHint('A', now), KeyHint('P', now + .001)))
     pose = advance(1, chord)
@@ -132,6 +138,13 @@ def check_motion_and_screens() -> None:
     assert pose.sleep < .04 and pose.zzz < .03 and 'A' in pose.pressed
     animation.clear_input()
     assert not pose.pressed and pose.left_key is None and pose.right_key is None
+
+    delayed = Animations()
+    for frame in range(30):
+        pose = delayed.advance(1 / 30, 5 + frame / 30, Activity(held=frozenset({'P'})))
+    assert 'P' in (pose.left_key, pose.right_key) and 'P' in pose.pressed
+    contact_x = pose.left_x if pose.left_key == 'P' else pose.right_x
+    assert abs(contact_x - BY_ID['P'].contact[0]) < .1
 
     monitor = ActivityMonitor(False)
     monitor.set_enabled(True)

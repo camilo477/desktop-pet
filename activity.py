@@ -96,13 +96,13 @@ class ActivityMonitor:
                     self.keymap = {}
                     for code in range(8, 256):
                         self.keymap[code] = key_for_symbol(display.keycode_to_keysym(code, 0), self.layouts[0])
-                    if not self.running or monitor._keyboard_listener is not self:
-                        raise self.StopException()
-                    monitor.set_layout(self.layouts[0])
-                    monitor._reader = display.query_keymap
-                    self._group = 0
+                    monitor.set_layout(self.layouts[0], self)
+                    with monitor._lock:
+                        if not self.running or monitor._keyboard_listener is not self:
+                            raise self.StopException()
+                        monitor._reader = display.query_keymap
                     for code in self._current_codes(display.query_keymap()):
-                        monitor.key_down(self._identifier(code, 0), code)
+                        monitor.key_down(self._identifier(code, 0), code, source=self)
                     if not self.running:
                         raise self.StopException()
 
@@ -122,11 +122,11 @@ class ActivityMonitor:
                     code, kind, stamp = int(event.detail), int(event.type), int(event.time)
                     group = (int(event.state) >> 13) & 3
                     layout = self.layouts[min(group, len(self.layouts) - 1)]
-                    monitor.set_layout(layout)
+                    monitor.set_layout(layout, self)
                     if kind == 2:  # X11 KeyPress and KeyRelease; no character conversion.
-                        monitor.key_down(self._identifier(code, group), code, stamp)
+                        monitor.key_down(self._identifier(code, group), code, stamp, self)
                     elif kind == 3:
-                        monitor.key_up(code, stamp)
+                        monitor.key_up(code, stamp, self)
 
                 def _stop_platform(self):
                     if hasattr(self, '_context'):
@@ -153,14 +153,17 @@ class ActivityMonitor:
             for listener in self._listeners:
                 listener.start()
         except Exception:
-            self._stop_listeners()
+            self.stop()
+            with self._lock:
+                self.enabled = enabled  # Keep local interaction available after backend failure.
 
-    def set_layout(self, layout):
+    def set_layout(self, layout, source=None):
         layout = layout if layout in ('es', 'latam') else 'us'
         with self._lock:
-            self._activity = replace(self._activity, layout=layout)
+            if source is None or source is self._keyboard_listener:
+                self._activity = replace(self._activity, layout=layout)
 
-    def key_down(self, identifier, code=None, server_time=None):
+    def key_down(self, identifier, code=None, server_time=None, source=None):
         if code is None:
             key = BY_ID.get(identifier)
             if key is None:
@@ -171,7 +174,7 @@ class ActivityMonitor:
         identifier = identifier if identifier in BY_ID else None
         now = time.monotonic()
         with self._lock:
-            if not self.enabled:
+            if not self.enabled or (source is not None and source is not self._keyboard_listener):
                 return
             self._activity = replace(self._activity, keyboard=now)
             pending = self._releases.pop(code, None)
@@ -189,9 +192,9 @@ class ActivityMonitor:
                 self._hints[sector] = hint
                 self._latest = hint
 
-    def key_up(self, code, server_time=None):
+    def key_up(self, code, server_time=None, source=None):
         with self._lock:
-            if self.enabled and code in self._down:
+            if self.enabled and (source is None or source is self._keyboard_listener) and code in self._down:
                 now = time.monotonic()
                 self._releases[code] = now + RELEASE_GRACE, server_time
                 self._activity = replace(self._activity, keyboard=now)

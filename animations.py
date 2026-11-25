@@ -95,8 +95,8 @@ class Paw:
         if self.goal != goal or self.motion_stamp != stamp:
             self.start = self.x, self.y
             distance = math.hypot(point[0] - self.x, point[1] - self.y)
-            self.duration = max(.11, min(.34, distance / 155))
-            self.arc = min(5.5, max(1.3 if goal in BY_ID else 0, distance * .15))
+            self.duration = max(.10, min(.28, distance / 230))
+            self.arc = min(4.5, max(1.3 if goal in BY_ID else 0, distance * .15))
             self.age = -.025
             self.goal, self.motion_stamp = goal, stamp
         self.target = point
