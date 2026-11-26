@@ -66,21 +66,26 @@ class MacInput:
         self.inactive = set()
         self.observers = []
         self.center = AppKit.NSWorkspace.sharedWorkspace().notificationCenter()
-        for name, reason, inactive in (
+        lifecycle = (
             (AppKit.NSWorkspaceWillSleepNotification, 'sleep', True),
             (AppKit.NSWorkspaceDidWakeNotification, 'sleep', False),
             (AppKit.NSWorkspaceSessionDidResignActiveNotification, 'session', True),
             (AppKit.NSWorkspaceSessionDidBecomeActiveNotification, 'session', False),
             (AppKit.NSWorkspaceScreensDidSleepNotification, 'screen', True),
             (AppKit.NSWorkspaceScreensDidWakeNotification, 'screen', False),
-        ):
-            def change(note, why=reason, block=inactive):
-                if block:
-                    self.inactive.add(why)
-                    self.disconnect()
-                else:
-                    self.inactive.discard(why)
-                self.next_check = 0
+        )
+        transitions = {name: (reason, blocked) for name, reason, blocked in lifecycle}
+
+        def change(note):
+            reason, blocked = transitions[note.name()]
+            if blocked:
+                self.inactive.add(reason)
+                self.disconnect()
+            else:
+                self.inactive.discard(reason)
+            self.next_check = 0
+
+        for name in transitions:
             token = self.center.addObserverForName_object_queue_usingBlock_(
                 name, None, NSOperationQueue.mainQueue(), change)
             self.observers.append(token)
@@ -145,9 +150,10 @@ class MacInput:
             self.monitor.set_layout(current_layout())
         if self.tap is not None and self.held and now >= self.next_reconcile:
             self.next_reconcile = now + .4
-            if secure_input():
+            permitted = CG.CGPreflightListenEventAccess()
+            if not permitted or secure_input():
                 self.disconnect()
-                self.set_status('restricted')
+                self.set_status('restricted' if permitted else 'denied')
             else:
                 for code in tuple(self.held):
                     if not self.key_state(code):

@@ -62,10 +62,12 @@ def checks(w):
         with patch('macos_input.secure_input', return_value=False):
             for down, repeat in ((True, False), (True, True), (False, False)):
                 event = CG.CGEventCreateKeyboardEvent(None, 0, down)
+                CG.CGEventSetTimestamp(event, time.monotonic_ns())
                 CG.CGEventSetIntegerValueField(event, CG.kCGKeyboardEventAutorepeat, int(repeat))
                 backend.event(None, CG.kCGEventKeyDown if down else CG.kCGEventKeyUp, event, None)
         state = w.activity.snapshot()
-        assert 'A' in state.pulses and state.new_presses == 1 and not state.any_held
+        assert ('A' in state.pulses, state.new_presses, state.any_held) == (True, 1, False), (
+            'A' in state.pulses, state.new_presses, state.any_held, bool(backend.inactive), w.activity.enabled)
         backend.configure(False)
         assert not w.activity.native_pointer and not w.activity.snapshot().pressed
     print('PASS: Cocoa panel, current source, local interaction, simulated denial and Quartz fixtures.')
