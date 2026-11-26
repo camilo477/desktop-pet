@@ -50,6 +50,7 @@ def check_capabilities():
     wl.receive(session, 'mutter', None)
     assert wl.idle(time.monotonic()) is None
     wl.receive(session, 'kde', ('KDE', 'dvorak'))
+    wl.receive(session, 'gnome', None)
     w.tick()
     assert w.keyboard.layout == 'dvorak'
     w.configure_keyboard(layout='fr')

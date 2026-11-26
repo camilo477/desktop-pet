@@ -45,9 +45,9 @@ class DesktopSession:
         kinds = ['standard']
         # A desktop name selects probes only. A successful protocol reply
         # establishes the capability. Avoid consulting a different desktop's settings.
-        if 'KDE' in desktops:
+        if 'KDE' in desktops or not any(desktops):
             kinds.append('kde')
-        if 'GNOME' in desktops:
+        if 'GNOME' in desktops or not any(desktops):
             kinds.extend(('mutter', 'gnome'))
         tasks = [asyncio.create_task(self.retry(kind)) for kind in kinds]
         try:
@@ -76,6 +76,7 @@ class WaylandActivity(QObject):
         self.pet = pet
         self.session = None
         self.sources = {}
+        self.layouts = {}
         self.surface = frozenset()
         self.layout_source = None
         self.drag_accepted = None
@@ -90,6 +91,7 @@ class WaylandActivity(QObject):
             session, self.session = self.session, None
             session.close()
             self.sources.clear()
+            self.layouts.clear()
             self.layout_source = None
             self.surface = frozenset()
 
@@ -115,7 +117,9 @@ class WaylandActivity(QObject):
         if kind == 'surface':
             self.surface = value or frozenset()
         elif kind in ('kde', 'gnome'):
-            self.layout_source, layout = value or (None, None)
+            self.layouts[kind] = value
+            source = self.layouts.get('kde') or self.layouts.get('gnome')
+            self.layout_source, layout = source or (None, None)
             self.pet.activity.set_layout(layout)
         else:
             previous, before = self.selected()
@@ -138,8 +142,12 @@ class WaylandActivity(QObject):
         def details():
             drag = {True: 'aceptado', False: 'rechazado', None: 'sin probar'}.get(self.drag_accepted)
             shape = 'anunciadas' if 'wl_compositor' in self.surface else 'gestionadas por Qt'
+            scale = ('El compositor anuncia escala fraccional. '
+                     if 'wp_fractional_scale_manager_v1' in self.surface else '')
+            layer = ('Ofrece capas, pero Miga utiliza una ventana móvil. '
+                     if 'zwlr_layer_shell_v1' in self.surface else '')
             QMessageBox.information(self.pet, 'Miga en Wayland',
-                f'Arrastre nativo {drag}. Regiones de entrada {shape}. '
+                f'Arrastre nativo {drag}. Regiones de entrada {shape}. {scale}{layer}'
                 'El compositor decide la ubicación y si mantiene la ventana encima. '
                 'Las caricias, los pelajes y el teclado manual siguen disponibles. '
                 'La actividad general regula el sueño sin identificar teclas ni movimientos. '

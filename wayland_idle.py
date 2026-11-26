@@ -1,9 +1,39 @@
 """Seat-wide idle transitions on a separate, input-free Wayland connection."""
 
 import asyncio
+import os
+import socket
+import struct
 import time
 
 from animations import IDLE_ACTION_AFTER
+
+
+def connect_display():
+    """Open a private connection to this session, never Qt's inherited fd."""
+    if os.environ.get('WAYLAND_SOCKET'):
+        raise OSError('A separate named compositor connection is required')
+    name = os.environ.get('WAYLAND_DISPLAY') or 'wayland-0'
+    if not os.path.isabs(name):
+        directory = os.environ.get('XDG_RUNTIME_DIR')
+        if not directory:
+            raise OSError('No Wayland runtime directory')
+        name = os.path.join(directory, name)
+    client = socket.socket(socket.AF_UNIX)
+    try:
+        client.settimeout(1)
+        client.connect(name)
+        client.setblocking(True)
+    except OSError:
+        client.close()
+        raise
+    return client
+
+
+def compositor_pid():
+    with connect_display() as client:
+        credentials = client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
+        return struct.unpack('3i', credentials)[0]
 
 
 async def observe(report):
@@ -11,8 +41,9 @@ async def observe(report):
     from pywayland.protocol.ext_idle_notify_v1 import ExtIdleNotifierV1
     from pywayland.protocol.wayland import WlSeat
 
-    display = Display()
-    display.connect()
+    with connect_display() as client:
+        display = Display(client.detach())  # libwayland owns this new connection.
+        display.connect()
     loop = asyncio.get_running_loop()
     failed = loop.create_future()
     registry = display.get_registry()

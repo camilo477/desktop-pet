@@ -7,6 +7,7 @@ import time
 
 from animations import IDLE_ACTION_AFTER
 from keyboard_distributions import detected_layout
+from wayland_idle import compositor_pid
 
 
 class Unavailable(Exception):
@@ -81,7 +82,7 @@ async def service(kind, report):
         if message.message_type != MessageType.SIGNAL:
             return
         if (message.sender == 'org.freedesktop.DBus' and message.interface == 'org.freedesktop.DBus'
-                and message.member == 'NameOwnerChanged' and message.body[0] == name):
+                and message.member == 'NameOwnerChanged' and message.body[0] in watched_names):
             replaced = True
         elif message.sender != owner or message.path != path or message.interface != interface:
             return
@@ -104,13 +105,22 @@ async def service(kind, report):
 
     ended = None
     owner = None
+    compositor_service = 'org.gnome.Mutter.IdleMonitor' if kind == 'gnome' else name
+    watched_names = {name, compositor_service}
     try:
         await asyncio.wait_for(bus.connect(), 2)
         ended = asyncio.create_task(bus.wait_for_disconnect())
         ended.add_done_callback(disconnected)
         bus.add_message_handler(signal)
-        await daemon('AddMatch', '', f"type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='{name}'")
-        owner = await daemon('GetNameOwner', 's', name)
+        for watched in watched_names:
+            await daemon('AddMatch', '', f"type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='{watched}'")
+        # Nested compositors can share a session bus with the host desktop.
+        # Its idle clock and layout would describe the wrong seat.
+        compositor = await daemon('GetNameOwner', 's', compositor_service)
+        pid = await daemon('GetConnectionUnixProcessID', 'u', compositor)
+        if pid != compositor_pid():
+            raise Unavailable()
+        owner = compositor if name == compositor_service else await daemon('GetNameOwner', 's', name)
         match = f"type='signal',sender='{owner}',path='{path}',interface='{interface}'"
         if kind == 'gnome':
             match += ",member='SettingChanged',arg0='org.gnome.desktop.input-sources',arg1='sources'"
