@@ -22,7 +22,7 @@ from animations import Animations, Pose, SLEEP_AFTER
 from keyboard_layout import Keyboard, KEY_TRAVEL
 from x11_keyboard import POSITIONS
 
-from main import instance_busy
+from linux_runtime import instance_busy
 from pet import PetWindow, visible_position
 from anatomy import BodyGeometry, FaceGeometry, MAX_REACH
 from character import CatArt

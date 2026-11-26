@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 import math
 import os
+import sys
 import threading
 import time
 
@@ -16,12 +17,15 @@ KEY_RECONCILE_INTERVAL = .25
 
 
 def is_wayland(platform):
-    return (platform.startswith('wayland') or os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland'
+    return sys.platform.startswith('linux') and (platform.startswith('wayland') or os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland'
             or bool(os.environ.get('WAYLAND_DISPLAY')))
 
 
 def supports_global_input(platform):
-    return platform == 'xcb' and bool(os.environ.get('DISPLAY')) and not is_wayland(platform)
+    if sys.platform == 'win32':
+        return platform == 'windows'
+    return (sys.platform.startswith('linux') and platform == 'xcb'
+            and bool(os.environ.get('DISPLAY')) and not is_wayland(platform))
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,7 @@ class ActivityMonitor:
     def __init__(self, global_input, wake_callback=None, keyboard=None):
         self.keyboard = keyboard or Keyboard()
         self.global_input = global_input
+        self.native_pointer = False
         self.enabled = False
         self._lock = threading.Lock()
         self._activity = Activity()
@@ -94,7 +99,8 @@ class ActivityMonitor:
 
     @property
     def global_pointer_active(self):
-        return self.enabled and len(self._listeners) > 1 and self._listeners[1].is_alive()
+        return self.enabled and (self.native_pointer or
+                                 len(self._listeners) > 1 and self._listeners[1].is_alive())
 
     def set_enabled(self, enabled):
         if enabled == self.enabled:
@@ -102,85 +108,15 @@ class ActivityMonitor:
         self.stop()
         with self._lock:
             self.enabled = enabled
-        if not enabled or not self.global_input:
+        if not enabled or not self.global_input or sys.platform != 'linux':
             return
-        os.environ['PYNPUT_BACKEND_KEYBOARD'] = 'xorg'
-        os.environ['PYNPUT_BACKEND_MOUSE'] = 'xorg'
         try:
-            from pynput import keyboard, mouse
-            from x11_keyboard import XkbKeyboard
-            monitor = self
-
-            # This small adapter uses the pinned X11 backend's raw hook. It avoids
-            # translating physical input into text, including under Shift or Caps Lock.
-            class PhysicalKeyboard(keyboard.Listener):
-                def _initialize(self, display):
-                    if not self.running:
-                        raise self.StopException()
-                    self.xkb = None
-                    try:
-                        self.xkb = XkbKeyboard(display)
-                        self.refresh_layout()
-                    except Exception:
-                        monitor.set_layout(None, self)
-                    with monitor._lock:
-                        if not self.running or monitor._keyboard_listener is not self:
-                            raise self.StopException()
-                        monitor._reader = display.query_keymap
-                    for code in self._current_codes(display.query_keymap()):
-                        monitor.key_down(self.xkb.positions.get(code) if self.xkb else None,
-                                         code, source=self, initial=True)
-                    if not self.running:
-                        raise self.StopException()
-
-                @staticmethod
-                def _current_codes(bitmap):
-                    return [code for code in range(8, 256) if bitmap[code // 8] & (1 << (code % 8))]
-
-                def refresh_layout(self):
-                    if self.xkb:
-                        monitor.set_layout(self.xkb.refresh(), self)
-
-                def _handle_message(self, display, event, injected):
-                    if monitor._keyboard_listener is not self:
-                        return
-                    code, kind, stamp = int(event.detail), int(event.type), int(event.time)
-                    group = (int(event.state) >> 13) & 3
-                    if self.xkb:
-                        monitor.set_layout(self.xkb.layout(group), self)
-                    if kind == 2:  # X11 KeyPress and KeyRelease; no character conversion.
-                        monitor.key_down(self.xkb.positions.get(code) if self.xkb else None, code, stamp, self)
-                    elif kind == 3:
-                        monitor.key_up(code, stamp, self)
-
-                def _stop_platform(self):
-                    if hasattr(self, '_context'):
-                        super()._stop_platform()
-
-            class PointerListener(mouse.Listener):
-                def _initialize(self, display):
-                    if not self.running:
-                        raise self.StopException()
-                    super()._initialize(display)
-                    pointer = display.screen().root.query_pointer()
-                    with monitor._lock:
-                        if self.running:
-                            monitor._global_position = (pointer.root_x, pointer.root_y)
-
-                def _stop_platform(self):
-                    if hasattr(self, '_context'):
-                        super()._stop_platform()
-
-            self._keyboard_listener = PhysicalKeyboard(suppress=False)
-            self._listeners = [self._keyboard_listener,
-                               PointerListener(on_move=self._move, on_click=self._click,
-                                               on_scroll=self._scroll, suppress=False)]
-            for listener in self._listeners:
-                listener.start()
+            from x11_input import start_listeners
+            start_listeners(self)
         except Exception:
             self.stop()
             with self._lock:
-                self.enabled = enabled  # Keep local interaction available after backend failure.
+                self.enabled = enabled  # Local interactions remain available.
 
     def set_layout(self, layout, source=None):
         layout = layout if layout in DISTRIBUTIONS else None
@@ -199,7 +135,7 @@ class ActivityMonitor:
     def key_down(self, identifier, code=None, server_time=None, source=None, initial=False):
         if code is None:
             code = identifier  # Synthetic input can use the physical position directly.
-        elif not isinstance(code, int) or not 8 <= code < 256:
+        elif not isinstance(code, tuple) and (not isinstance(code, int) or not 8 <= code < 256):
             return
         now = time.monotonic()
         with self._lock:
@@ -229,11 +165,14 @@ class ActivityMonitor:
                 self._hints[sector] = hint
                 self._latest = hint
 
-    def key_up(self, code, server_time=None, source=None):
+    def key_up(self, code, server_time=None, source=None, *, immediate=False):
         with self._lock:
             if self.enabled and (source is None or source is self._keyboard_listener) and code in self._down:
                 now = time.monotonic()
-                self._releases[code] = now + RELEASE_GRACE, server_time
+                if immediate:
+                    self._down.pop(code)
+                else:
+                    self._releases[code] = now + RELEASE_GRACE, server_time
                 self._activity = replace(self._activity, keyboard=now)
                 self._notify()
 
@@ -271,8 +210,7 @@ class ActivityMonitor:
                 self._global_position = position
             if previous is None or self._dragging:
                 return
-            if (local and self.global_input and len(self._listeners) > 1
-                    and self._listeners[1].is_alive() and self._global_position is not None):
+            if local and self.global_pointer_active and self._global_position is not None:
                 return
             dx, dy = x - previous[0], y - previous[1]
             self._pointer_distance += math.hypot(dx, dy)
@@ -378,9 +316,8 @@ class ActivityMonitor:
                 except Exception:
                     pass
 
-    def stop(self):
+    def clear_input(self):
         with self._lock:
-            self.enabled = False
             self._activity = Activity()
             self._context_click = False
             self._clear_keys()
@@ -393,4 +330,8 @@ class ActivityMonitor:
             self._new_presses = 0
             self._pointer_distance = self._wheel_distance = 0.0
             self._notice_pending = False
+
+    def stop(self):
+        self.enabled = False
+        self.clear_input()
         self._stop_listeners()
