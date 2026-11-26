@@ -287,7 +287,7 @@ def check_geometry_and_contacts() -> None:
                 assert math.dist((pose.left_x, pose.left_y), (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy)) < .01
         # Test the final painted object, including the SVG and painter transforms.
         moved = mouse_centroid(Pose(mouse_dx=pose.mouse_dx, mouse_dy=pose.mouse_dy))
-        for i, direction in enumerate((-dx, dy)):
+        for i, direction in enumerate((-dx, -dy)):
             if direction:
                 assert (moved[i] - origin[i]) * direction > 4
             else:
@@ -308,7 +308,7 @@ def check_geometry_and_contacts() -> None:
             before = pose.mouse_dx, pose.mouse_dy
             now += 1 / 30
             pose = animation.advance(1 / 30, now, Activity(mouse=now, motion_x=-dx * 6, motion_y=-dy * 6))
-            for axis, direction in enumerate((dx, -dy)):
+            for axis, direction in enumerate((dx, dy)):
                 after = (pose.mouse_dx, pose.mouse_dy)[axis]
                 assert (after - before[axis]) * direction >= -1e-8, 'Mouse continued against the new direction'
             assert abs(pose.mouse_dx) <= 12 and abs(pose.mouse_dy) <= 10

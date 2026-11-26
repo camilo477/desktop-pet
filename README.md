@@ -100,8 +100,8 @@ pointer movement or scrolling, followed by a smooth transfer. A stationary point
 click alone does not keep the paw on the mouse or keep the cat watching the
 cursor. When typing without pointer motion, attention moves to the keyboard.
 Scrolling without pointer movement directs attention to the small mouse.
-Horizontal mouse travel follows the cat's right and left, opposite to the viewer.
-Vertical travel follows screen directions.
+Mouse travel follows the cat's peripheral plane, with both horizontal and
+vertical directions reversed relative to the viewer.
 
 Held keys stay visibly pressed without repeating the paw's stroke. Fast taps
 leave a brief visual mark; rapid typing updates current paw targets rather than
