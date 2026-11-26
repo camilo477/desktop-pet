@@ -1,0 +1,48 @@
+name: macOS native checks
+on: workflow_dispatch
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native dependencies
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          sw_vers -productVersion
+          python -m venv .venv
+          .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
+      - name: Check Cocoa and the shared pet
+        run: |
+          .venv/bin/python tests/macos_keys.py
+          .venv/bin/python -u tests/macos_native.py
+          for test in keyboards coats interactions; do .venv/bin/python "tests/$test.py"; done
+      - name: Build native application
+        run: |
+          macos/build.sh
+          bundle="dist/$(uname -m)/Miga.app"
+          test "$(lipo -archs "$bundle/Contents/MacOS/Miga")" = "$(uname -m)"
+          codesign --verify --deep --strict "$bundle"
+      - name: Install, launch, update and remove
+        run: |
+          bundle="dist/$(uname -m)/Miga.app"
+          macos/install.sh --app "$bundle"
+          .venv/bin/python tests/macos_launcher.py
+          macos/install.sh --app "$bundle"
+          macos/uninstall.sh
+          test ! -e "$HOME/Applications/Miga.app"
+          test ! -e "$HOME/.local/bin/miga"

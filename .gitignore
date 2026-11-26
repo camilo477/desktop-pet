@@ -47,3 +47,9 @@ artifacts/
 
 # Windows source installation
 .venv-win/
+
+# Local macOS bundles, disk images and signing material
+*.app/
+*.dmg
+*.p12
+*.mobileprovision
