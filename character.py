@@ -11,7 +11,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 from animations import Pose, mix, smoothstep
 from anatomy import BodyGeometry, FaceGeometry
-from keyboard_layout import BOARD, KEYS, LABELS
+from keyboard_layout import BOARD, KEYS, KEYBOARD_SCALE, KEY_TRAVEL, LABELS
 
 BODY_TONES = ('neck-shade', 'chest-volume', 'hip-left', 'hip-right')
 
@@ -118,7 +118,7 @@ class CatArt:
         self.keyboard.fill(Qt.GlobalColor.transparent)
         p = QPainter(self.keyboard); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#647078'))
-        p.save(); p.translate(0, 2); p.drawPath(polygon(BOARD)); p.restore()
+        p.save(); p.translate(0, 2 * KEYBOARD_SCALE); p.drawPath(polygon(BOARD)); p.restore()
         p.setBrush(QColor('#929ea2')); p.drawPath(polygon(BOARD))
         for key in KEYS:
             self.draw_key(p, key, False, scale)
@@ -132,7 +132,7 @@ class CatArt:
         self.sleep_face = image, self.head_hit_paths[:]
 
     def draw_key(self, p, key, down, scale, pressure=0.0):
-        p.save(); p.translate(0, (.35 if down else 0) + pressure * .45)
+        p.save(); p.translate(0, (KEY_TRAVEL if down else 0) + pressure * .45 * KEYBOARD_SCALE)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#829294' if down else '#ccd2ce'))
         p.drawPath(self.key_paths[key.identifier])
         label = LABELS.get(self.layout, {}).get(key.identifier, key.label)
@@ -207,13 +207,14 @@ class CatArt:
         ax, ay = mix(sx, cx, 2 / 3), mix(sy, cy, 2 / 3)
         bx, by = mix(wx, cx, 2 / 3), mix(wy, cy, 2 / 3)
         if reach:
-            # The elbow folds below the chest. At full extension the wrist
-            # still approaches the top of the shell almost parallel to the floor.
-            fold = 1 - smoothstep((distance - 30) / 40)
-            ax = mix(ax, sx + dx * .12 + 3 + 7 * fold, reach)
-            ay = mix(ay, sy + dy * .62 + 7, reach)
-            bx = mix(bx, wx - dx * .38, reach)
-            by = mix(by, wy - dy * .04 + 3 * fold, reach)
+            # A shallow bow beside the shoulder–wrist chord. The elbow opens
+            # as the paw reaches outward, without folding the wrist back.
+            bend = mix(7.5, 4.5, smoothstep((distance - 32) / 25))
+            nx, ny = dy / max(1, distance), -dx / max(1, distance)
+            ax = mix(ax, sx + dx * .32 + nx * bend, reach)
+            ay = mix(ay, sy + dy * .32 + ny * bend, reach)
+            bx = mix(bx, sx + dx * .70 + nx * bend * .55, reach)
+            by = mix(by, sy + dy * .70 + ny * bend * .55, reach)
         left, right = [], []
         for i in range(15):
             t = i / 14; u = 1 - t
@@ -224,7 +225,7 @@ class CatArt:
             ty = uu * (ay - sy) + 2 * ut * (by - ay) + tt * (wy - by)
             length = max(.001, math.hypot(tx, ty))
             tx, ty = tx / length, ty / length
-            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * (.6 + reach * u)
+            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * .6 + reach * u * u
             left.append((x - ty * radius, y + tx * radius))
             right.append((x + ty * radius, y - tx * radius))
         cap = [(wx + (tx * math.sin(a) - ty * math.cos(a)) * 3,
@@ -352,6 +353,14 @@ class CatArt:
         p.save(); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         body = BodyGeometry(pose)
         self._tail(p, pose, body)
+        # A sleeping cat can curl in front of the parked mouse.
+        p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
+        if pose.scroll > .01:
+            p.translate(self.wheel_center); p.rotate(-14)
+            p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
+            p.drawLine(QPointF(step, -.6), QPointF(step, .6))
+        p.restore()
         p.save(); p.translate(104, 153); p.scale(mix(1, .82, body.sleep), mix(1, .65, body.sleep))
         p.translate(-104, -153); self.layer(p, 'hind-feet'); p.restore()
         self._body(p, pose, body)
@@ -360,13 +369,6 @@ class CatArt:
         for identifier in pose.pressed | pressures.keys():
             key = self.keys[identifier]
             self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
-        p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
-        if pose.scroll > .01:
-            p.translate(self.wheel_center); p.rotate(-14)
-            p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
-            p.drawLine(QPointF(step, -.6), QPointF(step, .6))
-        p.restore()
         washing_face = pose.action == 'wash' and pose.groom > .01
         if pose.sleep < .995:
             if not washing_face:

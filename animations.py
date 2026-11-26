@@ -5,12 +5,12 @@ import math
 import random
 
 from activity import Activity, KeyHint
-from keyboard_layout import BY_ID
+from keyboard_layout import BY_ID, KEY_TRAVEL
 from anatomy import BodyGeometry, FaceGeometry
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
-MOUSE_REST = (25.0, 161.0)  # Paw contact on the palm end of the shell.
+MOUSE_REST = (42.0, 157.0)  # Paw contact on the palm end of the shell.
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
@@ -412,10 +412,10 @@ class Animations:
         else:
             target_x, target_y = look[0] * 1.2, 0
         if mouse_active:
-            mouse_lean = -22 + pose.mouse_dx * .55
-            target_x = mix(mouse_lean, target_x, .32) if key_point else mouse_lean
-            target_x = min(target_x, -18 + min(0, pose.mouse_dx) * .9)
-            target_y = max(target_y, 16 + pose.mouse_dy * .35)
+            # Follow the planted paw with the chest; the opposite paw can still type.
+            mouse_lean = -15 + pose.mouse_dx * .55
+            target_x = mix(mouse_lean, target_x, .18) if key_point else mouse_lean
+            target_y = max(target_y, 10 + pose.mouse_dy * .32)
         if playing and self.action_kind == 'shift':
             target_x += self.look_side * action * 2
         if pose.groom > 0:
@@ -440,7 +440,7 @@ class Animations:
                 paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in BY_ID:
                 point = BY_ID[paw.key].contact
-                paw.aim(paw.key, (point[0], point[1] + .35), paw.stamp, activity.key_interval)
+                paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval)
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
             elif now - activity.keyboard < .70 and paw.ready is not None:
                 paw.aim('ready', paw.ready)
@@ -457,7 +457,7 @@ class Animations:
                     paw.vx, paw.vy = self.mouse_velocity
             if paw.goal in BY_ID and not paw.landed and paw.age >= paw.duration * .55:
                 contact = BY_ID[paw.goal].contact
-                if math.hypot(paw.x - contact[0], paw.y - contact[1] - .35) < 1.05:
+                if math.hypot(paw.x - contact[0], paw.y - contact[1] - KEY_TRAVEL) < 1.05:
                     paw.landed = True
                     strength = min(.7, .22 + paw.distance / 120 + math.hypot(paw.vx, paw.vy) / 900)
                     paw.pressure = strength

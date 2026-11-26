@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
 from animations import Animations, Pose, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
-from keyboard_layout import BY_ID, BY_SCAN, KEYS, LABELS, key_for_symbol
+from keyboard_layout import BOARD, BY_ID, BY_SCAN, KEYS, KEY_TRAVEL, LABELS, key_for_symbol
 from main import instance_busy
 from pet import PetWindow, visible_position
 from anatomy import BodyGeometry, FaceGeometry, MAX_REACH
@@ -123,7 +123,7 @@ def check_motion_and_screens() -> None:
     pose = advance(10, hold)
     assert pose.right_key == 'W' and 'W' in pose.pressed
     assert abs(pose.right_x - BY_ID['W'].contact[0]) < .1
-    assert abs(pose.right_y - BY_ID['W'].contact[1] - .35) < .1
+    assert abs(pose.right_y - BY_ID['W'].contact[1] - KEY_TRAVEL) < .1
     assert animation.last_activity == now and pose.sleep == 0
     now += SLEEP_AFTER + 1
     pose = animation.advance(1 / 30, now, hold)
@@ -141,7 +141,7 @@ def check_motion_and_screens() -> None:
     # Only actual motion reserves the mouse paw; the other can reach P.
     pose = advance(.4, Activity(keyboard=now, mouse=now, held=frozenset({'P'}), latest=KeyHint('P', now)), (1, -1))
     assert pose.right_key == 'P' and pose.left_key is None
-    assert pose.left_x < 45 and pose.right_x > 95
+    assert animation.mouse_contact and math.dist((pose.left_x, pose.left_y), MOUSE_REST) < .1
     assert -1 <= pose.gaze_x <= 1 and -1 <= pose.gaze_y <= 1
     pose = advance(1.4)
     assert pose.mouse < .01 and abs(pose.left_x - LEFT_REST[0]) < .1
@@ -201,6 +201,10 @@ def check_motion_and_screens() -> None:
     assert pose_scroll.mouse > .95 and pose_scroll.right_key == 'P'
     assert pose_scroll.mouse_dx == 0 and pose_scroll.mouse_dy == 0
     assert abs(pose_scroll.left_x - MOUSE_REST[0]) < .1
+    scroll.advance(1 / 30, now_scroll + .49, Activity(scroll=now_scroll))
+    assert scroll.mouse_contact
+    scroll.advance(1 / 30, now_scroll + .51, Activity(scroll=now_scroll))
+    assert not scroll.mouse_contact
     monitor.key_down('W', server_time=100)
     initial = monitor.snapshot().latest
     monitor.key_up(BY_ID['W'].scan, server_time=200)
@@ -267,13 +271,18 @@ def check_responsiveness() -> None:
 
 def check_geometry_and_contacts() -> None:
     art = CatArt(); art.cache(200, 1)
+    shell = art.renderer.boundsOnElement('mouse')
+    obstacles_x = min(art.renderer.boundsOnElement('hind-feet').left(), min(x for x, _ in BOARD))
+    assert shell.right() + 12 < obstacles_x
 
     def mouse_centroid(pose, fill='#a9b4b6'):
         image = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(image); art.draw(painter, pose); painter.end()
         color = QColor(fill).rgba()
-        points = [(x, y) for y in range(140, 185) for x in range(45) if image.pixel(x, y) == color]
+        bounds = shell.translated(pose.mouse_dx, pose.mouse_dy + pose.click * .4).toAlignedRect()
+        points = [(x, y) for y in range(bounds.top(), bounds.bottom() + 1)
+                  for x in range(bounds.left(), bounds.right() + 1) if image.pixel(x, y) == color]
         assert points
         return tuple(sum(p[i] for p in points) / len(points) for i in (0, 1))
 
@@ -290,6 +299,7 @@ def check_geometry_and_contacts() -> None:
         assert animation.mouse_contact
         wheel_x, _ = mouse_centroid(pose, '#59696e')
         assert wheel_x < moved[0] and wheel_x < pose.left_x  # Visible ahead of the planted paw.
+        assert math.dist(BodyGeometry(pose).shoulder(-1), (pose.left_x, pose.left_y)) < 60
         for i, direction in enumerate((-dx, -dy)):
             if direction:
                 assert (moved[i] - origin[i]) * direction > 4
@@ -333,7 +343,7 @@ def check_geometry_and_contacts() -> None:
             pose = animation.advance(1 / 30, frame / 30, Activity(held=frozenset({key.identifier}), latest=KeyHint(key.identifier, 0)))
         paw = next(paw for paw in animation.paws if paw.key == key.identifier)
         assert paw.landed, key.identifier
-        assert math.dist((paw.x, paw.y), (key.contact[0], key.contact[1] + .35)) < 1.05
+        assert math.dist((paw.x, paw.y), (key.contact[0], key.contact[1] + KEY_TRAVEL)) < 1.05
         assert pose.contact < .01  # Holding does not repeatedly create impacts.
         assert BodyGeometry(pose).hips == (104, 153)
 
