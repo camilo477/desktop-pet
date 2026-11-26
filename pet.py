@@ -53,6 +53,7 @@ class PetWindow(QWidget):
         platform = QApplication.platformName().lower()
         self.mask_supported = platform == "xcb" or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
+        self.native_windows = platform == "windows"
         self.windows_input = None
         self.global_input = supports_global_input(platform)
         self.layout_mode = self.preference('layout_mode', ('auto', 'manual'), 'auto')
@@ -123,7 +124,7 @@ class PetWindow(QWidget):
         app.screenRemoved.connect(lambda screen: QTimer.singleShot(0, self.ensure_visible))
         for screen in app.screens():
             self.watch_screen(screen)
-        if self.global_input and platform == 'windows':
+        if self.global_input and self.native_windows:
             from windows_input import WindowsInput
             self.windows_input = WindowsInput(self.activity)
         self.render_frame()
@@ -226,6 +227,11 @@ class PetWindow(QWidget):
         painter.scale(self.width() / 200.0, self.height() / 200.0)
         self.art.draw(painter, self.animations.pose)
         painter.end()
+        if self.native_windows:
+            # Windows hit-tests each pixel of the layered surface itself, at
+            # native resolution. A binary QWidget mask would clip soft edges.
+            self.update()
+            return
         now = time.monotonic()
         handle = self.windowHandle()
         pose = self.animations.pose
@@ -379,6 +385,8 @@ class PetWindow(QWidget):
         moved = self.dragging
         if moved:
             self.activity.set_dragging(False)
+            if self.windows_input and self.windows_input.active:
+                self.windows_input.sync_cursor()
             self.local_pointer = None
             if self.animations.carried:
                 self.animations.put_down(time.monotonic())

@@ -13,11 +13,53 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from appearance import Appearance
 from pet import PetWindow
-from windows_input import Device, Key, Mouse, function, user
+from windows_input import Device, Key, Mouse, foreground, function, user
+
+
+def hit_tests(app):
+    from PySide6.QtTest import QTest
+    background = QWidget()
+    background.setGeometry(25, 25, 400, 380)
+    background.show()
+    background.activateWindow()
+    QTest.qWait(120)
+    before = foreground()
+    pet = PetWindow()
+    pet.set_size(200)
+    pet.move(45, 50)
+    pet.show()
+    QTest.qWait(120)
+    hwnd = int(pet.winId())
+    assert foreground() == before and before != hwnd
+    hit = function(user, 'WindowFromPoint', W.HWND, W.POINT)
+    to_screen = function(user, 'ClientToScreen', W.BOOL, W.HWND, C.POINTER(W.POINT))
+    rect = W.RECT()
+    bounds = function(user, 'GetClientRect', W.BOOL, W.HWND, C.POINTER(W.RECT))
+    assert bounds(hwnd, C.byref(rect))
+    scale = rect.right / pet.width()
+    assert abs(scale - pet.devicePixelRatioF()) < .01
+
+    def target(x, y):
+        point = W.POINT(round(x * scale), round(y * scale))
+        assert to_screen(hwnd, C.byref(point))
+        return hit(point)
+
+    for form, coat, paused in (('100', 'original', False), ('60', 'calico', True)):
+        pet.configure_keyboard(form=form)
+        pet.configure_appearance(Appearance(coat, 'auto', 'auto'))
+        pet.set_paused(paused)
+        QTest.qWait(90)
+        head = pet.art.head_position
+        assert target(head.x(), head.y()) == hwnd
+        assert target(2, 2) == int(background.winId())
+        assert foreground() == before
+    print(f'PASS: native opaque and transparent hit targets, foreground preserved, scale {scale:g}.')
+    pet.close()
+    background.close()
 
 
 def window_checks(app):
@@ -113,7 +155,10 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as tmp:
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, tmp)
-        window_checks(app)
+        hit_tests(app)
         QSettings().clear()
-        benchmark(app)
+        if '--dpi' not in sys.argv:
+            window_checks(app)
+            QSettings().clear()
+            benchmark(app)
     print('PASS: native Qt window, input registration, session messages, menu close and preferences.')

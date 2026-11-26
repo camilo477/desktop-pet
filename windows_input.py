@@ -98,12 +98,20 @@ class WindowsInput:
             # INPUTSINK + DEVNOTIFY. Keep normal keyboard and mouse delivery intact.
             devices = (Device * 2)(Device(1, 2, 0x2100, hwnd), Device(1, 6, 0x2100, hwnd))
             self.active = self.monitor.native_pointer = bool(register(devices, 2, C.sizeof(Device)))
+            if self.active:
+                self.sync_cursor()
 
     def reset(self):
         self.held.clear()
         self.screen = None
         self.next_layout = self.next_reconcile = 0.0
         self.monitor.clear_input()
+
+    def sync_cursor(self):
+        point = QCursor.pos()
+        self.screen = QGuiApplication.screenAt(point)
+        self.monitor.reset_pointer_origin()
+        self.monitor.pointer_moved(point.x(), point.y())
 
     def poll(self, now):
         if not self.hwnd or self.locked or self.suspended:

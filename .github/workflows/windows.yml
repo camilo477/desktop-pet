@@ -10,37 +10,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: Miga prueba
+          path: Miga prueba ñ
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           architecture: x64
       - name: Install for the runner user
-        working-directory: Miga prueba
+        working-directory: Miga prueba ñ
         run: |
           .\install.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "$pwd\windows\bin" >> $env:GITHUB_PATH
       - name: Exercise the native Qt window, Raw Input and launchers
-        working-directory: Miga prueba
+        working-directory: Miga prueba ñ
         run: |
           $python = '.\.venv-win\Scripts\python.exe'
           foreach ($test in 'windows_keys', 'windows_native', 'windows_launcher', 'keyboards', 'coats') {
             & $python "tests/$test.py"
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
+          foreach ($scale in '1.25', '1.5', '1.75', '2') {
+            $env:QT_SCALE_FACTOR = $scale
+            & $python tests/windows_native.py --dpi
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          Remove-Item Env:QT_SCALE_FACTOR
+          $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Miga Desktop Pet.lnk'
+          Start-Process -FilePath $shortcut
+          & $python -c "import time; from windows_runtime import runtime_directory,instance_busy; d=runtime_directory(); end=time.monotonic()+15; exec('while not instance_busy(d) and time.monotonic()<end: time.sleep(.1)'); assert instance_busy(d)"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           miga
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           miga off
           exit $LASTEXITCODE
       - name: Build and start the portable folder
-        working-directory: Miga prueba
+        working-directory: Miga prueba ñ
         run: |
           .\windows\build.ps1
           .\.venv-win\Scripts\python.exe tests/windows_launcher.py "$pwd\dist\Miga\Miga.exe"
           exit $LASTEXITCODE
       - name: Check reinstall and uninstall
-        working-directory: Miga prueba
+        working-directory: Miga prueba ñ
         run: |
           .\install.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
