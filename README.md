@@ -10,7 +10,7 @@ appearances, gestures and animation code.
 | Platform | Available integration | Automated and native checks | Hands-on validation remaining |
 | --- | --- | --- | --- |
 | Linux X11 | Global physical input and XKB | Native X11 input, Qt rendering and launcher | Additional desktops and monitor arrangements |
-| Linux Wayland | Local interaction, manual layouts | Nested Weston and shared Qt tests | Compositor-specific placement and topmost behavior |
+| Linux Wayland | Seat idle and wake when available, KDE layout or single configured GNOME source, local interaction | Native nested GNOME 46, virtual KWin 6.6 and headless Weston 13 | Fedora KDE desktop, mixed physical scales and hotplug |
 | Windows x64 | Raw Input, installer and portable folder | Windows Server 2025 x64, native input and packaging | Windows 11/10 client desktops and hardware |
 | macOS arm64 and x86_64 | Cocoa panel, optional Quartz input, Finder app and CLI | macOS 15 on both architectures, synthetic input through the session tap, transparent hit targets, app builds and local IPC | Granting and revoking permission, physical input devices, Secure Input, Spaces and mixed-DPI displays |
 
@@ -24,6 +24,7 @@ appearances, gestures and animation code.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
   mouse appears on the viewer's left.
 - Actual key presses, holds and releases on X11, Windows and permitted macOS sessions, including simultaneous keys.
+- On native Wayland, a compositor idle notification can keep Miga awake while you work in another window. The **Wayland** submenu shows the current capabilities.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Typing speed follows actual press cadence and reach distance, with continuous
   redirection instead of queued strokes.
@@ -69,7 +70,9 @@ and clears held keys.
 ## Technologies
 
 Python 3, PySide6 (Qt Widgets, Qt SVG, local IPC and QSettings) and original
-SVG artwork. X11 uses pynput. Windows uses Raw Input through ctypes.
+SVG artwork. Native Wayland can use two optional Linux bindings, PyWayland for
+seat idle notifications and dbus-next for desktop idle and keyboard settings.
+X11 uses pynput. Windows uses Raw Input through ctypes.
 macOS uses the PyObjC Quartz and Cocoa bindings and native Text Input Source Services.
 The application uses PySide6 Essentials.
 
@@ -293,32 +296,22 @@ represented positions. Small legends appear as the rendering resolution permits.
   metadata unchanged may need manual selection or a restart of activity reactions.
   Unknown or unavailable layouts show an explicit US fallback in the menu.
   Positions with unknown physical names contribute activity only.
-- **Wayland, including XWayland sessions:** global input listeners are disabled.
-  Manual keyboard selection, local pointer reactions, idle animations, clicks and menu controls remain
-  available. Native Wayland dragging uses the compositor's move request. Body
-  sway uses position changes reported by Qt; a compositor that hides window
-  coordinates can still move the pet, with reduced directional sway.
-  Relaxation and sleep use only activity actually observed by the application;
-  they do not measure the computer's global inactivity on Wayland.
-- Window placement, position restoration, click-through masking, hiding from
-  task switchers and keeping the pet above other applications depend on the
-  compositor. In particular, native Wayland may ignore placement and topmost
-  requests. No root access, input-device permissions or desktop extensions
-  are required.
+- **Native Wayland.** Miga uses seat idle notifications or Mutter's idle monitor to
+  stay awake during desktop activity and wake on its return. With neither source
+  available, its sleep clock follows local interactions. KDE can supply the
+  active keyboard group. On GNOME a single configured XKB source can supply
+  the legends. The keyboard menu always offers manual selection.
+- Global physical keys, pointer motion and scrolling in other applications are
+  unavailable in Wayland sessions, including when Qt runs under XWayland.
+  Native Wayland uses the compositor for dragging and final window placement.
+  See the [Wayland compatibility table and desktop checks](WAYLAND.md).
 
 ## Known limitations
 
-The window and global input have been checked on GNOME/X11. Local petting and
-compositor-managed dragging have also been checked in a nested Weston session.
-On native Wayland the compositor may consume button release. Miga settles when
-pointer focus returns, or estimates release if the grip has moved outside its
-visible shape. GNOME/Wayland, KDE Plasma and physical multi-monitor setups
-still require manual checks.
-GNOME/Wayland and other compositors can restrict topmost behavior and exact
-position restoration. Global keyboard and pointer tracking are unavailable in
-Wayland sessions; local pointer tracking still works while the pointer is over
-Miga. Without an X11 input-recording facility, global activity can be unavailable
-even when local interactions work.
+Always-on-top, task switching, exact placement and monitor restoration depend on
+the compositor. Native Wayland can hide position changes and the final button
+release during a system move. Miga limits its directional sway to reported
+motion. X11 global reactions require a working RECORD extension.
 
 Each represented key lights on the first available frame. The paws follow the
 current targets. Fast typing can redirect a paw before it lands, and with one
