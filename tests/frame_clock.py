@@ -120,7 +120,12 @@ def sample_display_link(window):
         print('No display link for the test window.', flush=True)
         return
     window.timer.stop()
-    link.setPreferredFramesPerSecond_(30)
+    # AppKit's display link supports the frame-rate range API on macOS 15.
+    if not link.respondsToSelector_(b'setPreferredFrameRateRange:'):
+        link.invalidate()
+        print('Window display link has no configurable frame-rate range.', flush=True)
+        return
+    link.setPreferredFrameRateRange_((30., 30., 30.))
     link.addToRunLoop_forMode_(NSRunLoop.mainRunLoop(), NSRunLoopCommonModes)
     frames, paints = window.frames, window.paints
     start, cpu = time.perf_counter(), time.process_time()
