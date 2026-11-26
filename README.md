@@ -41,7 +41,10 @@ activity in a transparent window without taking keyboard focus.
 - Keyboard, pointer and scroll input redirect the paws from their current
   positions during any idle action or while waking. Pressed keys light up on
   the next frame. Contact follows when a paw actually reaches the peripheral.
-- Head pats with a brief coordinated squint and lean, dragging, and clicks through empty areas.
+- Head pats, sustained petting, independent ear flicks and a flexible tail
+  that draws back at a touch. The touch targets follow the painted pose.
+- Nearby pointer motion can draw Miga's gaze toward its face. Lifting Miga
+  tucks its paws and lets its body lean gently into changes of direction.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
 
@@ -103,21 +106,33 @@ instance. A private local socket handles shutdown, with a process lock protectin
 startup and recovery after unexpected exits. No HTTP server or background service
 is installed.
 
-Drag the cat with the left mouse button. Click its head for a short pat reaction,
-even with activity reactions disabled. Dragging and clicks elsewhere do not
-trigger a head pat. The right-click menu offers **Tamaño** (150, 200 or 300
+Click Miga's head for a short pat. Hold the left button still on its head for
+about a third of a second to keep petting it. Miga leans into your hand, closes
+its eyes and gradually opens them again over about 0.7 seconds after release.
+Click either ear for a quick flick, or touch the visible tail to make it curl
+away. Moving the pointer close to its face briefly draws its attention.
+
+To pick Miga up, hold the left button on its silhouette or peripherals and move
+past the desktop's normal drag distance. This also works halfway through a pat.
+The keyboard and mouse move with the window. Miga tucks its forepaws, leans
+against the motion and settles when you stop. Real keys still light up during
+the drag. On release, the paws can type, reach the mouse or scroll immediately
+while the body regains its balance. The next pointer movement starts from the
+release position. Empty areas allow clicks through where supported.
+
+The right-click menu offers **Tamaño** (150, 200 or 300
 logical pixels), **Siempre
 visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
 Pausing stops the animation timer and input listeners while keeping dragging
 and menu controls available. Disabling activity reactions stops global input
-listeners; normal idle behaviors continue.
+listeners; direct touch, lifting and normal idle behaviors continue.
 
 The mouse paw returns to the keyboard after approximately 500 ms without real
 pointer movement or scrolling, followed by a smooth transfer. A stationary pointer or a
-click alone does not keep the paw on the mouse or keep the cat watching the
-cursor. When typing without pointer motion, attention moves to the keyboard.
+click alone does not keep the paw on the mouse. Interest in a nearby face-level
+pointer fades when it stops. When typing without pointer motion, attention moves to the keyboard.
 Scrolling without pointer movement directs attention to the small mouse.
 Mouse travel follows the cat's peripheral plane, with both horizontal and
 vertical directions reversed relative to the viewer.
@@ -146,7 +161,9 @@ are simple constants in `animations.py`.
   Number-pad positions remain distinct when Num Lock is off on supported physical layouts.
 - **Wayland, including XWayland sessions:** global input listeners are disabled.
   Local pointer reactions, idle animations, clicks and menu controls remain
-  available. Native Wayland dragging uses the compositor's move request.
+  available. Native Wayland dragging uses the compositor's move request. Body
+  sway uses position changes reported by Qt; a compositor that hides window
+  coordinates can still move the pet, with reduced directional sway.
   Relaxation and sleep use only activity actually observed by the application;
   they do not measure the computer's global inactivity on Wayland.
 - Window placement, position restoration, click-through masking, hiding from
@@ -157,8 +174,12 @@ are simple constants in `animations.py`.
 
 ## Known limitations
 
-The window and global input have been checked on GNOME/X11. Native Wayland,
-KDE Plasma and physical multi-monitor setups require further manual checks.
+The window and global input have been checked on GNOME/X11. Local petting and
+compositor-managed dragging have also been checked in a nested Weston session.
+On native Wayland the compositor may consume button release. Miga settles when
+pointer focus returns, or estimates release if the grip has moved outside its
+visible shape. GNOME/Wayland, KDE Plasma and physical multi-monitor setups
+still require manual checks.
 GNOME/Wayland and other compositors can restrict topmost behavior and exact
 position restoration. Global keyboard and pointer tracking are unavailable in
 Wayland sessions; local pointer tracking still works while the pointer is over

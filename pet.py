@@ -80,6 +80,7 @@ class PetWindow(QWidget):
         self.press_origin = QPoint()
         self.dragging = False
         self.system_drag = False
+        self.native_anchor = None
         self.drag_sample = None
         self.frame = QPixmap()
         self.last_mask = QRegion()
@@ -90,7 +91,7 @@ class PetWindow(QWidget):
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self.tick)
         self.position_timer = QTimer(self)
-        self.position_timer.setInterval(300)
+        self.position_timer.setInterval(750)
         self.position_timer.timeout.connect(self.check_native_release)
         self._menu = None
         screen = QApplication.primaryScreen()
@@ -288,6 +289,7 @@ class PetWindow(QWidget):
                 self.animations.lift()
                 self.drag_sample = self.pos()
             if self.native_wayland and self.windowHandle():
+                self.native_anchor = event.position().toPoint()
                 started = self.windowHandle().startSystemMove()
                 self.system_drag = started and self.dragging
                 if self.system_drag:
@@ -323,9 +325,18 @@ class PetWindow(QWidget):
             self.finish_drag()
 
     def check_native_release(self) -> None:
-        # Compositor-managed moves can consume the widget's release event.
+        # Some backends clear Qt's button state as soon as they hand off the
+        # grab. Wait for pointer focus to return. If the grip is now outside
+        # the painted mask, the compositor may never send that enter event.
+        if (self.system_drag and self.native_anchor is not None
+                and not self.last_mask.contains(self.native_anchor)
+                and not QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+            self.finish_drag()
+
+    def enterEvent(self, event) -> None:
         if self.system_drag and not QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             self.finish_drag()
+        super().enterEvent(event)
 
     def finish_drag(self) -> None:
         self.position_timer.stop()
@@ -341,6 +352,7 @@ class PetWindow(QWidget):
         self.press_region = None
         self.dragging = False
         self.system_drag = False
+        self.native_anchor = None
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         if moved:
             self.ensure_visible()

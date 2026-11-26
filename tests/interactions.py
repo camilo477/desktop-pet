@@ -12,7 +12,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
-from PySide6.QtGui import QCursor, QImage, QPainter
+from PySide6.QtGui import QCursor, QEnterEvent, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -243,6 +243,15 @@ def check_drag(window):
     QTest.mouseRelease(window, LEFT, pos=anchor)
     assert window.pos() == released + QPoint(27, -12)
     assert window.frame.toImage() == frozen and not window.timer.isActive()
+
+    # Wayland can report no buttons from the start of a compositor-owned move.
+    window.system_drag = window.dragging = True
+    window.native_anchor = anchor
+    with patch.object(QApplication, 'mouseButtons', return_value=Qt.MouseButton.NoButton):
+        window.check_native_release()
+        assert window.dragging
+        window.enterEvent(QEnterEvent(QPointF(anchor), QPointF(anchor), QPointF(window.mapToGlobal(anchor))))
+    assert not window.dragging and window.native_anchor is None
 
 
 if __name__ == '__main__':
