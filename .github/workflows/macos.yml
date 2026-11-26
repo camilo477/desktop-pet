@@ -1,5 +1,10 @@
 name: macOS native checks
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      comparison:
+        description: Optional baseline commit for same-runner frame measurements
+        type: string
 permissions:
   contents: read
 
@@ -33,6 +38,19 @@ jobs:
           .venv/bin/python -u tests/macos_native.py | tee "$RUNNER_TEMP/miga-cocoa-check.txt"
           grep -Fxq 'PASS: all three native frame samples.' "$RUNNER_TEMP/miga-cocoa-check.txt"
           for test in keyboards coats interactions; do .venv/bin/python "tests/$test.py"; done
+      - uses: actions/checkout@v4
+        if: inputs.comparison != ''
+        with:
+          ref: ${{ inputs.comparison }}
+          path: comparison
+          persist-credentials: false
+      - name: Compare native frame clocks
+        if: inputs.comparison != ''
+        run: |
+          for tree in comparison .; do
+            echo "Measuring $tree"
+            .venv/bin/python tests/frame_clock.py "$(cd "$tree" && pwd)"
+          done
       - name: Build native application
         run: |
           macos/build.sh
