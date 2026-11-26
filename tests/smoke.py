@@ -167,7 +167,9 @@ def check_motion_and_screens() -> None:
     # Accelerate only the inactivity clock, while advancing full motion frames.
     now += SLEEP_AFTER + 1
     pose = advance(5)
-    assert animation.sleeping and pose.zzz > .99 and pose.left_y > 140
+    assert animation.sleeping and pose.zzz > .99
+    assert math.dist((pose.left_x, pose.left_y), LEFT_REST) < .01
+    assert math.dist((pose.right_x, pose.right_y), RIGHT_REST) < .01
     pose = advance(.6, Activity(keyboard=now, held=frozenset({'A'}), latest=KeyHint('A', now)))
     assert pose.sleep < .04 and pose.zzz < .03 and 'A' in pose.pressed
     animation.clear_input()
@@ -425,6 +427,11 @@ def check_geometry_and_contacts() -> None:
         painter = QPainter(image); art.draw(painter, pose); painter.end()
         return image
 
+    def eyes_visible(image):
+        head = art.head_hit_paths[-1].boundingRect().toAlignedRect()
+        return any(image.pixel(x, y) == art.iris.rgba() for y in range(head.top(), head.bottom() + 1)
+                   for x in range(head.left(), head.right() + 1))
+
     # Inspect the actual first wake frame, including the key before its paw lands.
     for source in ('keyboard', 'mouse', 'scroll'):
         animation = Animations()
@@ -432,6 +439,12 @@ def check_geometry_and_contacts() -> None:
         for frame in range(65):
             animation.advance(.1, 200 + frame / 10)
         assert animation.sleeping
+        asleep = painted(animation.pose)
+        assert not eyes_visible(asleep) and art.head_hit(art.head_position) is not None
+        # From the chest to the floor, sleep uses exactly the seated drawing.
+        lower_body = QRect(0, 110, 200, 90)
+        seated = painted(replace(animation.pose, sleep=0, zzz=0))
+        assert asleep.copy(lower_body) == seated.copy(lower_body)
         now = 207
         waking = Activity(**{source: now})
         if source == 'keyboard':
@@ -439,7 +452,7 @@ def check_geometry_and_contacts() -> None:
         pose = animation.advance(.1, now, waking)
         image = painted(pose)
         assert pose.sleep > .8 and not pose.contacts and not animation.mouse_contact
-        assert any(image.pixel(x, y) == art.iris.rgba() for y in range(118, 139) for x in range(85, 137))
+        assert eyes_visible(image) and 0 < pose.zzz < 1
         if source == 'keyboard':
             key_area = art.key_paths['A'].boundingRect().adjusted(-1, -1, 1, 2).toAlignedRect()
             assert image.copy(key_area) != painted(replace(pose, pressed=frozenset())).copy(key_area)

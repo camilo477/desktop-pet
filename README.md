@@ -33,9 +33,10 @@ activity in a transparent window without taking keyboard focus.
 - Eyes and head respond independently to shared attention; facial features use
   a small projected surface to follow turns and downward glances.
 - Occasional grooming, face washing, yawning, glancing and small posture changes.
-- Gradual relaxation and a tucked sleeping posture with slow breathing and small Zzz.
+- Miga falls asleep seated at the keyboard. Its eyes close, its head dips to one
+  side and three Zs drift up beside its head as its breathing slows.
 - Current input redirects the paws during grooming, yawning and waking. Pressed
-  keys light up on the next frame while the eyes open and the torso uncurls.
+  keys light up on the next frame while the eyes open and the head lifts.
 - Head pats with a brief coordinated squint and lean, dragging, and clicks through empty areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.

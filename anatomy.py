@@ -5,24 +5,14 @@ import math
 MAX_REACH = 78.0
 
 
-def mix(a, b, t):
-    return a + (b - a) * t
-
-
-def smooth(value):
-    value = max(0.0, min(1.0, value))
-    return value * value * (3 - 2 * value)
-
-
 class BodyGeometry:
     def __init__(self, pose):
-        self.sleep = smooth(pose.sleep)
         self.x = pose.balance_x + pose.contact_side * pose.contact * .45
         contact_dip = pose.contact * (1.25 + max(0, pose.expression.opening - 1) * 2)
         self.y = (pose.balance_y + pose.relax * 1.2 - pose.breath * .55
                   + pose.pet * 1.1 + contact_dip)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
-        self.mouse_reach = pose.mouse * (1 - self.sleep)
+        self.mouse_reach = pose.mouse
 
     def map(self, x, y):
         # Zero deformation at the floor: the haunches do not slide with the chest.
@@ -36,15 +26,15 @@ class BodyGeometry:
 
     @property
     def chest(self):
-        return self.map(104, mix(111, 134, self.sleep))
+        return self.map(104, 111)
 
     @property
     def neck(self):
-        return self.map(mix(103, 110, self.sleep), mix(94, 129, self.sleep))
+        return self.map(103, 94)
 
     @property
     def head(self):
-        return self.map(mix(103, 110, self.sleep), mix(76.5, 131, self.sleep))
+        return self.map(103, 76.5)
 
     @property
     def tail_base(self):
@@ -52,8 +42,7 @@ class BodyGeometry:
 
     def shoulder(self, side):
         slide = self.mouse_reach if side < 0 else 0
-        return self.map(mix(87 if side < 0 else 119, 90 if side < 0 else 119, self.sleep) - 4 * slide,
-                        mix(115, 139, self.sleep) + 4 * slide)
+        return self.map((87 if side < 0 else 119) - 4 * slide, 115 + 4 * slide)
 
     def reachable(self, side, point):
         sx, sy = self.shoulder(side)
@@ -67,21 +56,20 @@ class BodyGeometry:
 class FaceGeometry:
     def __init__(self, pose, body=None):
         body = body or BodyGeometry(pose)
-        self.sleep = body.sleep
         self.cx, self.cy = body.head
-        awake = 1 - self.sleep
-        self.yaw = pose.head_x * .46 * awake
-        self.pitch = (pose.head_y * .34 + pose.expression.pitch + pose.contact * .025) * awake
-        self.roll = math.radians(pose.head_tilt * awake)
-        self.cy += pose.pet * 2 + pose.groom * .8
-        self.scale = mix(.92, 1.0, self.sleep)
+        # The neck stays anchored as the chin dips and the head settles to one side.
+        self.cx += 3.8 * pose.sleep
+        self.cy += 4.6 * pose.sleep + pose.pet * 2 + pose.groom * .8
+        self.yaw = pose.head_x * .46 + .17 * pose.sleep
+        self.pitch = pose.head_y * .34 + pose.expression.pitch + pose.contact * .025 + .12 * pose.sleep
+        self.roll = math.radians(pose.head_tilt + 14 * pose.sleep)
         self.cos_y, self.sin_y = math.cos(self.yaw), math.sin(self.yaw)
         self.cos_p, self.sin_p = math.cos(self.pitch), math.sin(self.pitch)
         self.cos_r, self.sin_r = math.cos(self.roll), math.sin(self.roll)
 
     def _screen(self, x, y):
-        return (self.cx + self.scale * (x * self.cos_r - y * self.sin_r),
-                self.cy + self.scale * (x * self.sin_r + y * self.cos_r))
+        return (self.cx + .92 * (x * self.cos_r - y * self.sin_r),
+                self.cy + .92 * (x * self.sin_r + y * self.cos_r))
 
     def point(self, x, y, depth=None):
         if depth is None:

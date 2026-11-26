@@ -145,6 +145,7 @@ class Animations:
         self.pose = Pose()
         self.personality = Personality()
         self.tip_phase = 0.0
+        self.breath_phase = 0.0
         self.time = 0.0
         self.paws = [Paw(*LEFT_REST), Paw(*RIGHT_REST)]
         self.last_activity = None
@@ -353,15 +354,16 @@ class Animations:
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
         pose.sleep = approach(pose.sleep, self.sleep_goal, 2.4 if sleep_target else 12, dt)
-        # The eyelids can open while the slower torso is still uncurling.
+        # The eyelids can open while the head is still tilted.
         pose.blink = max(pose.blink, .64 * pose.relax, smoothstep((self.sleep_goal - .35) / .65))
         pose.zzz = approach(pose.zzz, smoothstep((pose.sleep - .78) / .22) if sleep_target else 0, 8, dt)
-        pose.breath = math.sin(self.time * math.tau / mix(4.2, 6.2, pose.sleep)) * mix(1, .4, pose.sleep)
+        self.breath_phase = (self.breath_phase + dt * math.tau / mix(4.2, 6.2, pose.sleep)) % math.tau
+        pose.breath = math.sin(self.breath_phase) * mix(1, .4, pose.sleep)
         if self.sleeping and sleep_target and not active:
             pose.blink = 1.0; pose.tail = 0.0
             pose.tail_tip = 0.0
             pose.ear_left = pose.ear_right = 0.0
-            pose.gaze_x = pose.gaze_y = pose.head_x = pose.head_y = 0.0
+            pose.gaze_x = pose.gaze_y = pose.head_x = pose.head_y = pose.head_tilt = 0.0
             self.head_velocity[:] = (0.0, 0.0, 0.0)
             pose.pressed = frozenset()
             return pose
@@ -411,7 +413,7 @@ class Animations:
         else:
             look = (0, .10)
         look = (mix(look[0], pose.pet_side * .32, pose.pet), mix(look[1], .3, pose.pet))
-        if pose.sleep > .4:
+        if sleep_target:
             look = (look[0] * (1 - pose.sleep), look[1] * (1 - pose.sleep))
         look = tuple(max(-1, min(1, value)) for value in look)
         # All three channels receive attention directly, rather than filtering each other.
@@ -444,8 +446,9 @@ class Animations:
             target_y += pose.groom * 1.8
         target_y += pose.relax * 1.2 - pose.yawn * .6 + expression.lean
         old_balance = pose.balance_x
-        pose.balance_x = approach(pose.balance_x, target_x * (1 - pose.sleep), 10, dt)
-        pose.balance_y = approach(pose.balance_y, target_y * (1 - pose.sleep), 10, dt)
+        rest_weight = 1 - pose.sleep if sleep_target else 1
+        pose.balance_x = approach(pose.balance_x, target_x * rest_weight, 10, dt)
+        pose.balance_y = approach(pose.balance_y, target_y * rest_weight, 10, dt)
         pose.balance_velocity = (pose.balance_x - old_balance) / max(.001, dt)
         swivel = toward * expression.tilt * .6
         pose.ear_left += (swivel - expression.ears) * (1 - pose.sleep) + pose.balance_velocity * .013
@@ -462,8 +465,6 @@ class Animations:
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
             elif playing and self.action_kind in ('lick', 'wash') and index == 0:
                 paw.aim('groom', face.grooming_target(self.action_kind, phase))
-            elif pose.sleep > .08 and sleep_target:
-                paw.aim('tuck', (90 if index == 0 else 118, 144))
             elif now - activity.keyboard < .70 and paw.ready is not None:
                 paw.aim('ready', paw.ready)
             else:

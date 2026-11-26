@@ -12,6 +12,7 @@ from PySide6.QtSvg import QSvgRenderer
 from animations import Pose, mix, smoothstep
 from anatomy import BodyGeometry, FaceGeometry
 from keyboard_layout import BOARD, KEYS, KEYBOARD_SCALE, KEY_TRAVEL, LABELS
+from personality import DROWSY
 
 BODY_TONES = ('neck-shade', 'chest-volume', 'hip-left', 'hip-right')
 
@@ -43,9 +44,8 @@ class CatArt:
         self.wheel_center = self.renderer.boundsOnElement('mouse-wheel').center()
         elements = {node.get('id'): node for node in ET.parse(path).iter() if node.get('id')}
         self.shapes = {}
-        names = ('body', 'body-sleep', 'head-shape', 'head-sleep', 'tail', 'tail-sleep',
-                 'ear-left', 'ear-right', 'ear-inner-left', 'ear-inner-right', 'face-volume')
-        names += tuple(name + suffix for name in BODY_TONES for suffix in ('', '-sleep'))
+        names = ('body', 'head-shape', 'tail', 'ear-left', 'ear-right',
+                 'ear-inner-left', 'ear-inner-right', 'face-volume') + BODY_TONES
         for name in names:
             node = elements[name]
             if node.tag.endswith('g'):
@@ -55,16 +55,8 @@ class CatArt:
             commands = re.findall('[A-Za-z]', data)
             count = (len(values) - 2) // 6
             if commands != ['M'] + ['C'] * count + ['Z'] or len(values) != 2 + count * 6:
-                raise RuntimeError('Silhouettes must use matching absolute M/C/Z curves.')
+                raise RuntimeError('Silhouettes must use absolute M/C/Z curves.')
             self.shapes[name] = list(zip(values[::2], values[1::2]))
-        pairs = (('body', 'body-sleep'), ('head-shape', 'head-sleep'), ('tail', 'tail-sleep'))
-        for a, b in pairs + tuple((name, name + '-sleep') for name in BODY_TONES):
-            if len(self.shapes[a]) != len(self.shapes[b]):
-                raise RuntimeError('Resting silhouettes must retain their curve topology.')
-        self.sleep_body = curve(self.shapes['body-sleep'])
-        self.sleep_head = curve(self.shapes['head-sleep'])
-        self.sleep_tail = curve(self.shapes['tail-sleep'])
-        self.ears = {name: curve(self.shapes[name]) for name in ('ear-left', 'ear-right')}
         self.head_hit_paths = []
         self.head_center = 101.0
         self.head_position = QPointF(103, 76.5)
@@ -87,10 +79,8 @@ class CatArt:
         self.face_tone = QColor(elements['face-volume'].get('fill'))
         self.lid_color = QColor(elements['closed-eyes'].get('stroke'))
         self.body_tones = {name: QColor(elements[name].get('fill')) for name in BODY_TONES}
-        self.sleep_tones = [(curve(self.shapes[name + '-sleep']), color)
-                            for name, color in self.body_tones.items()]
-        font = QFont('sans-serif'); font.setPixelSize(8)
-        self.z_path = QPainterPath(); self.z_path.addText(QPointF(0, 0), font, 'z')
+        font = QFont('sans-serif'); font.setPixelSize(9); font.setWeight(QFont.Weight.DemiBold)
+        self.z_path = QPainterPath(); self.z_path.addText(QPointF(0, 0), font, 'Z')
 
     def set_layout(self, layout):
         layout = layout if layout in LABELS else 'us'
@@ -127,9 +117,9 @@ class CatArt:
         image = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
         image.fill(Qt.GlobalColor.transparent)
         p = QPainter(image); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
-        resting = Pose(sleep=1, blink=1)
+        resting = Pose(sleep=1, relax=1, blink=1, expression=DROWSY)
         self._head(p, resting, BodyGeometry(resting)); p.end(); image.setDevicePixelRatio(scale)
-        self.sleep_face = image, self.head_hit_paths[:]
+        self.sleep_face = image, self.head_position, self.head_hit_paths[:]
 
     def draw_key(self, p, key, down, scale, pressure=0.0):
         p.save(); p.translate(0, (KEY_TRAVEL if down else 0) + pressure * .45 * KEYBOARD_SCALE)
@@ -150,41 +140,22 @@ class CatArt:
     def layer(self, p, name):
         origin, image = self.layers[name]; p.drawPixmap(origin, image)
 
-    def blended(self, a, b, sleep):
-        return [(mix(x, sx, sleep), mix(y, sy, sleep))
-                for (x, y), (sx, sy) in zip(self.shapes[a], self.shapes[b])]
-
-    def _body(self, p, pose, body):
-        sleep = body.sleep
+    def _body(self, p, body):
         p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
-        if sleep > .999:
-            p.save(); p.translate(104, 153); p.scale(1, 1 - pose.breath * .003)
-            p.translate(-104, -153); p.drawPath(self.sleep_body)
-            p.setClipPath(self.sleep_body)
-            for path, color in self.sleep_tones:
-                p.setBrush(color); p.drawPath(path)
-            p.restore()
-            return
-        points = self.blended('body', 'body-sleep', sleep)
-        outline = curve([body.map(x, y) for x, y in points])
+        outline = curve([body.map(x, y) for x, y in self.shapes['body']])
         p.drawPath(outline)
         p.save(); p.setClipPath(outline)
         for name, color in self.body_tones.items():
-            points = self.blended(name, name + '-sleep', sleep)
-            p.setBrush(color); p.drawPath(curve([body.map(x, y) for x, y in points]))
+            p.setBrush(color); p.drawPath(curve([body.map(x, y) for x, y in self.shapes[name]]))
         p.restore()
 
     def _tail(self, p, pose, body):
-        sleep = body.sleep
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.tail_fur)
-        if sleep > .999:
-            p.drawPath(self.sleep_tail)
-            return
-        points = self.blended('tail', 'tail-sleep', sleep)
+        points = self.shapes['tail']
         warped = []
+        amplitude = (pose.tail * 2.4 + pose.pet * .8 + abs(pose.balance_velocity) * .012) * (1 - pose.sleep)
         for i, (x, y) in enumerate(points):
             weight = math.sin(math.pi * i / (len(points) - 1)) ** 2
-            amplitude = (pose.tail * 2.4 + pose.pet * .8 + abs(pose.balance_velocity) * .012) * (1 - sleep)
             x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
             y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
             y += pose.tail_tip * weight * weight
@@ -251,51 +222,44 @@ class CatArt:
     def _head(self, p, pose, body):
         face = FaceGeometry(pose, body)
         self.head_position = QPointF(face.cx, face.cy)
-        s = body.sleep
-        if s > .999 and self.sleep_face is not None:
-            image, paths = self.sleep_face
-            transform = QTransform.fromTranslate(face.cx - 110, face.cy - 131)
-            p.drawPixmap(QPointF(face.cx - 110, face.cy - 131), image)
+        if pose.sleep == 1 and pose.blink == 1 and self.sleep_face is not None:
+            image, origin, paths = self.sleep_face
+            offset = self.head_position - origin
+            transform = QTransform.fromTranslate(offset.x(), offset.y())
+            p.drawPixmap(offset, image)
             self.head_hit_paths = [transform.map(path) for path in paths]
             self.head_center = face.cx
             return
-        cx, cy = mix(101, 110, s), mix(77, 131, s)
         self.head_center = face.cx
         self.head_hit_paths = []
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.head_fur)
         for side, name, anchor in ((-1, 'ear-left', (82, 57)), (1, 'ear-right', (125, 57))):
             angle = math.radians((pose.ear_left if side < 0 else pose.ear_right)
-                                 + side * s * 27 + side * pose.pet * 13)
+                                 + side * pose.sleep * 20 + side * pose.pet * 13)
             cos, sin = math.cos(angle), math.sin(angle)
-            ax, ay = mix(anchor[0], 91 if side < 0 else 128, s), mix(anchor[1], 120, s)
-            points = []
-            for x, y in self.shapes[name]:
-                x, y = (x - anchor[0]) * (1 - s * .25), (y - anchor[1]) * (1 - s * .25)
-                points.append(face.point(ax + x * cos - y * sin - cx,
-                                         ay + x * sin + y * cos - cy, -3))
-            path = curve(points); p.setBrush(self.head_fur); p.drawPath(path)
+
+            def ear_point(x, y):
+                x, y = x - anchor[0], y - anchor[1]
+                return face.point(anchor[0] - 101 + x * cos - y * sin,
+                                  anchor[1] - 77 + x * sin + y * cos, -3)
+
+            path = curve([ear_point(x, y) for x, y in self.shapes[name]])
+            p.setBrush(self.head_fur); p.drawPath(path)
             self.head_hit_paths.append(path)
-            inner = []
-            for x, y in self.shapes['ear-inner-left' if side < 0 else 'ear-inner-right']:
-                x, y = (x - anchor[0]) * (1 - s * .25), (y - anchor[1]) * (1 - s * .25)
-                inner.append(face.point(ax + x * cos - y * sin - cx,
-                                        ay + x * sin + y * cos - cy, -3))
+            inner = self.shapes['ear-inner-left' if side < 0 else 'ear-inner-right']
             p.save(); p.setClipPath(path); p.setBrush(self.ear_inner)
-            p.drawPath(curve(inner)); p.restore()
+            p.drawPath(curve([ear_point(x, y) for x, y in inner])); p.restore()
         p.setBrush(self.head_fur)
-        points = self.blended('head-shape', 'head-sleep', s)
-        shape = curve([face.outline(x - cx, y - cy) for x, y in points])
+        shape = curve([face.outline(x - 101, y - 77) for x, y in self.shapes['head-shape']])
         p.drawPath(shape); self.head_hit_paths.append(shape)
         blink = max(pose.blink, pose.yawn * .92,
                     pose.groom * (.65 if pose.action == 'wash' else .2))
         p.save(); p.setClipPath(shape)
-        face_points = [(mix(x - 101, (x - 101) * .76, s),
-                        mix(y - 77, (y - 77) * .60, s)) for x, y in self.shapes['face-volume']]
         p.setBrush(self.face_tone)
-        p.drawPath(curve([face.point(x, y) for x, y in face_points]))
+        p.drawPath(curve([face.point(x - 101, y - 77) for x, y in self.shapes['face-volume']]))
         for side in (-1, 1):
-            ex, ey = side * mix(13.7, 10, s), -1.15
-            width = mix(8.45, 7.8, s)
+            ex, ey = side * 13.7, -1.15
+            width = 8.45
             opening = pose.expression.opening
             top = mix(-9.6 * opening, 1.1, blink)
             bottom = mix(8.1 * (.4 + .6 * opening), 1.1, blink)
@@ -307,8 +271,8 @@ class CatArt:
                               face.point(ex - width * .65, ey + bottom + slope * .3), left])
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.iris); p.drawPath(aperture)
             p.save(); p.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
-            px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5 * (1 - s)
-            py = ey + pose.gaze_y * 2.0 * (1 - s)
+            px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5
+            py = ey + pose.gaze_y * 2.0
             radius = pose.expression.pupil
             height = 7 + max(0, opening - 1) * 4
             pupil = curve([face.point(px, py - height), face.point(px - radius, py - 3),
@@ -337,32 +301,32 @@ class CatArt:
         p.restore()
         for side in (-1, 1):
             flex = (pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5
-                    + pose.balance_velocity * .006 + pose.expression.whiskers * (1 - s))
+                    + pose.balance_velocity * .006 + pose.expression.whiskers)
             p.setPen(QPen(self.whisker, .65, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.setBrush(Qt.BrushStyle.NoBrush)
             for level in (-1, 1):
-                whisker = QPainterPath(); whisker.moveTo(*face.point(side * mix(22, 16, s), 10 + level * 1.4))
-                whisker.cubicTo(*face.point(side * mix(27, 20, s), 10 + level * 1.8, 12),
-                                *face.point(side * mix(33, 26, s), 10 + level * 3 + flex, 8),
-                                *face.point(side * mix(37, 29, s), 10 + level * 3.2 + flex, 6))
+                whisker = QPainterPath(); whisker.moveTo(*face.point(side * 22, 10 + level * 1.4))
+                whisker.cubicTo(*face.point(side * 27, 10 + level * 1.8, 12),
+                                *face.point(side * 33, 10 + level * 3 + flex, 8),
+                                *face.point(side * 37, 10 + level * 3.2 + flex, 6))
                 p.drawPath(whisker)
 
     def _zzz(self, p, pose):
         if pose.zzz < .01:
             return
         for index in range(3):
-            phase = (pose.time * .38 + index / 3) % 1
-            p.save(); p.translate(130 + phase * 4, 116 - phase * 13)
-            p.scale(.65 + phase * .25, .65 + phase * .25)
-            p.setOpacity(pose.zzz * math.sin(math.pi * phase))
-            p.setPen(QPen(QColor('#eef0e8'), 1.1)); p.setBrush(QColor('#5b686f'))
-            p.drawPath(self.z_path); p.restore()
+            phase = (pose.time * .31 + index / 3) % 1
+            p.save(); p.translate(self.head_position + QPointF(44 + phase * 17, -17 - phase * 30))
+            size = .76 + phase * .34
+            p.scale(size, size)
+            p.setOpacity(pose.zzz * smoothstep(phase / .13) * smoothstep((1 - phase) / .22))
+            p.strokePath(self.z_path, QPen(QColor('#f0f2ed'), 1.4))
+            p.fillPath(self.z_path, QColor('#526168')); p.restore()
 
     def draw(self, p, pose):
         p.save(); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         body = BodyGeometry(pose)
         self._tail(p, pose, body)
-        # A sleeping cat can curl in front of the parked mouse.
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
         if pose.scroll > .01:
             p.translate(self.wheel_center); p.rotate(-77)
@@ -370,19 +334,17 @@ class CatArt:
             step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
             p.drawLine(QPointF(step, -.6), QPointF(step, .6))
         p.restore()
-        p.save(); p.translate(104, 153); p.scale(mix(1, .82, body.sleep), mix(1, .65, body.sleep))
-        p.translate(-104, -153); self.layer(p, 'hind-feet'); p.restore()
-        self._body(p, pose, body)
+        self.layer(p, 'hind-feet')
+        self._body(p, body)
         p.drawPixmap(0, 0, self.keyboard)
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():
             key = self.keys[identifier]
             self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
         washing_face = pose.action == 'wash' and pose.groom > .01
-        if pose.sleep < .995:
-            if not washing_face:
-                self._arm(p, pose, -1, body)
-            self._arm(p, pose, 1, body)
+        if not washing_face:
+            self._arm(p, pose, -1, body)
+        self._arm(p, pose, 1, body)
         self._head(p, pose, body)
         if washing_face:
             self._arm(p, pose, -1, body)

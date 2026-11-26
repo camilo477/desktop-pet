@@ -186,7 +186,7 @@ class PetWindow(QWidget):
                      round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
                      round(pose.contact * 15), round(pose.mouse_dx * 2), round(pose.mouse_dy * 2),
                      round(pose.groom * 20), round(pose.yawn * 20))
-        if handle and (force_mask or signature != self.mask_signature or now - self.mask_time >= 0.1):
+        if handle and (force_mask or signature != self.mask_signature or pose.zzz > .01 or now - self.mask_time >= 0.1):
             # Native masks use logical pixels; keep antialiased edges inside the mask.
             image = self.frame.toImage().scaled(self.size())
             image.setDevicePixelRatio(1)
