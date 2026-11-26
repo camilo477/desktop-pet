@@ -79,7 +79,7 @@ class WindowsInput:
         self.held = {}
         self.screen = None
         self.layout_ids = special_layouts()
-        self.next_layout = self.next_reconcile = 0.0
+        self.next_register = self.next_layout = self.next_reconcile = 0.0
         self.packet = Packet()
 
     def configure(self, hwnd):
@@ -95,16 +95,19 @@ class WindowsInput:
         self.reset()
         if hwnd:
             session_on(hwnd, 0)
-            # INPUTSINK + DEVNOTIFY. Keep normal keyboard and mouse delivery intact.
-            devices = (Device * 2)(Device(1, 2, 0x2100, hwnd), Device(1, 6, 0x2100, hwnd))
-            self.active = self.monitor.native_pointer = bool(register(devices, 2, C.sizeof(Device)))
-            if self.active:
-                self.sync_cursor()
+            self.register_input()
+
+    def register_input(self):
+        # INPUTSINK + DEVNOTIFY. Keep normal keyboard and mouse delivery intact.
+        devices = (Device * 2)(Device(1, 2, 0x2100, self.hwnd), Device(1, 6, 0x2100, self.hwnd))
+        self.active = self.monitor.native_pointer = bool(register(devices, 2, C.sizeof(Device)))
+        if self.active:
+            self.sync_cursor()
 
     def reset(self):
         self.held.clear()
         self.screen = None
-        self.next_layout = self.next_reconcile = 0.0
+        self.next_register = self.next_layout = self.next_reconcile = 0.0
         self.monitor.clear_input()
 
     def sync_cursor(self):
@@ -116,6 +119,9 @@ class WindowsInput:
     def poll(self, now):
         if not self.hwnd or self.locked or self.suspended:
             return
+        if not self.active and now >= self.next_register:
+            self.next_register = now + 5
+            self.register_input()
         if self.held and now >= self.next_reconcile:
             self.next_reconcile = now + .4
             for code, vk in tuple(self.held.items()):
@@ -178,7 +184,7 @@ class WindowsInput:
         if not self.hwnd or msg.hWnd != self.hwnd:
             return False, 0
         if msg.message == 0x02b1:  # WM_WTSSESSION_CHANGE
-            if msg.wParam in (1, 2, 3, 4, 6, 7, 8):
+            if msg.wParam in (1, 2, 3, 4, 5, 6, 7, 8):
                 self.locked = msg.wParam in (2, 4, 6, 7)
                 self.reset()
         elif msg.message == 0x218 and msg.wParam in (4, 7, 18):  # WM_POWERBROADCAST

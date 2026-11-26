@@ -157,7 +157,14 @@ def window_checks(app):
 
 def benchmark(app):
     from PySide6.QtCore import QEventLoop, QTimer
-    pet = PetWindow()
+    class MeasuredWindow(PetWindow):
+        frames = 0
+
+        def render_frame(self, *args, **kwargs):
+            self.frames += 1
+            super().render_frame(*args, **kwargs)
+
+    pet = MeasuredWindow()
     pet.set_paused(False)
     pet.set_size(300)
     pet.show()
@@ -186,14 +193,17 @@ def benchmark(app):
             QTimer.singleShot(seconds * 1000, loop.quit)
             loop.exec()
         run(1)
-        cpu, start = time.process_time(), time.monotonic()
+        cpu, start, frames = time.process_time(), time.monotonic(), pet.frames
         run(5)
-        used = 100 * (time.process_time() - cpu) / (time.monotonic() - start)
+        elapsed = time.monotonic() - start
+        used = 100 * (time.process_time() - cpu) / elapsed
+        rate = (pet.frames - frames) / elapsed
         keys.stop()
         assert (not pet.timer.isActive()) if mode == 'paused' else pet.timer.interval() == (100 if mode == 'sleep' else 34)
         rss = subprocess.check_output(['powershell.exe', '-NoProfile', '-Command',
                                       f'(Get-Process -Id {os.getpid()}).WorkingSet64'], text=True)
-        print(f'{mode}: {used:.2f}% one core, {int(rss.strip()) / 2**20:.1f} MiB RSS')
+        assert rate == 0 if mode == 'paused' else rate > (6 if mode == 'sleep' else 15)
+        print(f'{mode}: {used:.2f}% one core, {int(rss.strip()) / 2**20:.1f} MiB RSS, {rate:.1f} FPS')
     pet.shutdown()
 
 

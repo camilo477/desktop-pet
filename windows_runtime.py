@@ -53,10 +53,11 @@ def instance_busy(directory):
 
 def endpoint(directory):
     try:
-        name = (directory / 'endpoint').read_text(encoding='ascii')
+        with (directory / 'endpoint').open('rb') as marker:
+            name = marker.read(38)
     except FileNotFoundError:
         return None
-    return name if re.fullmatch(r'miga-[0-9a-f]{32}', name) else None
+    return name.decode('ascii') if re.fullmatch(rb'miga-[0-9a-f]{32}', name) else None
 
 
 def serve(directory, ready_fd=None):

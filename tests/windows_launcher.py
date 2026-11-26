@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -16,6 +17,24 @@ def main():
     app = QCoreApplication([])
     directory = runtime_directory()
     assert not instance_busy(directory), 'Use a disposable session without Miga running'
+    if not sys.argv[1:]:
+        # Interrupt only this test's own child. A new owner must be able to
+        # replace its stale endpoint after Windows releases the file lock.
+        child = subprocess.Popen([sys.executable, str(ROOT / 'main.py'), '--run'])
+        try:
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                name = endpoint(directory)
+                if name and instance_busy(directory) and request(name, b'ping'):
+                    break
+                time.sleep(.05)
+            else:
+                raise AssertionError('Test instance never became ready')
+        finally:
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=8)
+        assert not instance_busy(directory)
     if sys.argv[1:]:
         cli = [sys.argv[1]]
     else:

@@ -25,6 +25,8 @@ jobs:
         working-directory: Miga prueba ñ
         run: |
           $python = '.\.venv-win\Scripts\python.exe'
+          & $python -c "from PySide6.QtCore import QSettings; s=QSettings('desktop-pet','mascota'); s.setValue('size',150); s.setValue('appearance/coat','calico'); s.setValue('keyboard/format','65'); s.sync()"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($test in 'windows_keys', 'windows_native', 'windows_launcher', 'keyboards', 'coats') {
             & $python "tests/$test.py"
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -57,3 +59,7 @@ jobs:
           .\uninstall.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if (Test-Path .venv-win) { throw 'Installation was not removed' }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Miga Desktop Pet.lnk')) { throw 'Shortcut was not removed' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'User').Split(';') -contains "$pwd\windows\bin") { throw 'Owned PATH entry remains' }
+          $prefs = 'HKCU:\Software\desktop-pet\mascota'
+          if ((Get-ItemPropertyValue $prefs size) -ne 150 -or (Get-ItemPropertyValue "$prefs\appearance" coat) -ne 'calico' -or (Get-ItemPropertyValue "$prefs\keyboard" format) -ne '65') { throw 'Reinstall or uninstall lost preferences' }
