@@ -55,7 +55,9 @@ def endpoint(directory):
     try:
         with (directory / 'endpoint').open('rb') as marker:
             name = marker.read(38)
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
+        # During replacement Windows can briefly expose a delete-pending
+        # generation. The caller retries discovery within its startup deadline.
         return None
     return name.decode('ascii') if re.fullmatch(rb'miga-[0-9a-f]{32}', name) else None
 
