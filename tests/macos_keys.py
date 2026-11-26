@@ -17,7 +17,10 @@ for code, (side, other, family) in MODIFIERS.items():
     assert modifier_down(code, family, lambda i: i == code)
 assert wheel_units(-20, 10, True) == (-1., .5)
 assert wheel_units(80, -1, False) == (4., -1.)
-assert source_layout('com.apple.keylayout.Dvorak') == 'dvorak'
+for source, layout in (('ABC', 'us'), ('British', 'gb'), ('LatinAmerican', 'latam'),
+                       ('Spanish-ISO', 'es'), ('German', 'de'), ('French', 'fr'),
+                       ('Dvorak', 'dvorak'), ('Colemak', 'colemak')):
+    assert source_layout('com.apple.keylayout.' + source) == layout
 assert source_layout('custom.US') is None
 assert source_layout('com.apple.keylayout.Dvorak-QwertyCmd') is None
 print('PASS: Apple physical positions, overlapping modifiers, hardware ISO swap, wheels and source IDs.')

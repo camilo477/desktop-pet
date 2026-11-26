@@ -29,6 +29,11 @@ def run(*args):
     subprocess.run(args, check=True)
 
 
+def version(value):
+    parts = tuple(map(int, value.split('.')))
+    return parts + (0,) * (3 - len(parts))
+
+
 def check_bundle(app):
     if app.is_symlink() or not app.is_dir():
         raise ValueError('Expected a Miga.app directory.')
@@ -36,6 +41,7 @@ def check_bundle(app):
         info = plistlib.load(stream)
     if info.get('CFBundleIdentifier') != BUNDLE_ID or info.get('MigaProject') != PROJECT:
         raise ValueError('The existing application does not belong to this project.')
+    return info
 
 
 def build(stage):
@@ -79,7 +85,10 @@ def install(source):
     with TemporaryDirectory(dir=APP.parent, prefix='.miga-install-') as tmp:
         stage = Path(tmp)
         if source:
-            check_bundle(source)
+            info = check_bundle(source)
+            minimum = info.get('LSMinimumSystemVersion', '14.4')
+            if version(platform.mac_ver()[0]) < version(minimum):
+                raise ValueError(f'This bundle requires macOS {minimum} or later.')
             app = stage / 'Miga.app'
             run('/usr/bin/ditto', source, app)
         else:
@@ -160,7 +169,7 @@ def main():
             with installation_lock():
                 uninstall()
         return
-    if platform.machine() not in ('arm64', 'x86_64') or tuple(map(int, platform.mac_ver()[0].split('.'))) < (14, 4):
+    if platform.machine() not in ('arm64', 'x86_64') or version(platform.mac_ver()[0]) < (14, 4, 0):
         raise ValueError('Miga requires macOS 14.4 or later on Apple Silicon or Intel.')
     translated = subprocess.run(['/usr/sbin/sysctl', '-in', 'sysctl.proc_translated'],
                                 capture_output=True, text=True)

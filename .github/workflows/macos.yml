@@ -29,7 +29,9 @@ jobs:
       - name: Check Cocoa and the shared pet
         run: |
           .venv/bin/python tests/macos_keys.py
-          .venv/bin/python -u tests/macos_native.py
+          set -o pipefail
+          .venv/bin/python -u tests/macos_native.py | tee "$RUNNER_TEMP/miga-cocoa-check.txt"
+          grep -Fxq 'PASS: all three native frame samples.' "$RUNNER_TEMP/miga-cocoa-check.txt"
           for test in keyboards coats interactions; do .venv/bin/python "tests/$test.py"; done
       - name: Build native application
         run: |
@@ -37,6 +39,7 @@ jobs:
           bundle="dist/$(uname -m)/Miga.app"
           test "$(lipo -archs "$bundle/Contents/MacOS/Miga")" = "$(uname -m)"
           codesign --verify --deep --strict "$bundle"
+          echo "Bundle minimum macOS $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$bundle/Contents/Info.plist")"
       - name: Install, launch, update and remove
         run: |
           bundle="dist/$(uname -m)/Miga.app"

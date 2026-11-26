@@ -1,4 +1,4 @@
-"""Checks on a disposable Aqua session. Never request TCC or post an event."""
+"""Native Aqua checks. Session delivery uses our own foreground test window in CI."""
 
 import os
 from pathlib import Path
@@ -6,6 +6,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import time
+import traceback
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -127,15 +128,27 @@ def checks(w):
                 CG.CGEventSetTimestamp(event, time.monotonic_ns())
                 CG.CGEventSetIntegerValueField(event, CG.kCGKeyboardEventAutorepeat, int(repeat))
                 backend.event(None, CG.kCGEventKeyDown if down else CG.kCGEventKeyUp, event, None)
+            wheel = CG.CGEventCreateScrollWheelEvent(None, CG.kCGScrollEventUnitLine, 2, 1, -2)
+            CG.CGEventSetTimestamp(wheel, time.monotonic_ns())
+            backend.event(None, CG.kCGEventScrollWheel, wheel, None)
         state = w.activity.snapshot()
+        assert (state.scroll_x, state.scroll_y) == (-2, 1)
         assert ('A' in state.pulses, state.new_presses, state.any_held) == (True, 1, False), (
             'A' in state.pulses, state.new_presses, state.any_held, bool(backend.inactive), w.activity.enabled)
+        with patch('macos_input.secure_input', return_value=False):
+            caps = CG.CGEventCreateKeyboardEvent(None, 57, True)
+            for flags in (CG.kCGEventFlagMaskAlphaShift, CG.kCGEventFlagMaskAlphaShift, 0):
+                CG.CGEventSetTimestamp(caps, time.monotonic_ns())
+                CG.CGEventSetFlags(caps, flags)
+                backend.event(None, CG.kCGEventFlagsChanged, caps, None)
+            state = w.activity.snapshot()
+            assert state.new_presses == 2 and not state.any_held
         backend.configure(False)
         assert not w.activity.native_pointer and not w.activity.snapshot().pressed
     print('PASS: Cocoa panel, current source, local interaction, simulated denial and Quartz fixtures.')
 
 
-def benchmark(w):
+def samples(w):
     w.set_size(300)
     for mode in ('typing', 'sleep', 'pause'):
         w.set_paused(mode == 'pause')
@@ -147,16 +160,16 @@ def benchmark(w):
         keys.timeout.connect(press)
         if mode == 'typing':
             keys.start(70)
+            yield 800
         elif mode == 'sleep':
             w.animations.last_activity = time.monotonic() - 215
             for _ in range(10):
-                wait(800)
+                yield 800
                 if w.animations.sleeping:
                     break
             assert w.animations.sleeping
         wall, cpu, frames = time.monotonic(), time.process_time(), w.frames
-        QTimer.singleShot(5000, QApplication.quit)
-        QApplication.instance().exec()
+        yield 5000
         elapsed = time.monotonic() - wall
         used = 100 * (time.process_time() - cpu) / elapsed
         keys.stop()
@@ -164,6 +177,24 @@ def benchmark(w):
         fps = (w.frames - frames) / elapsed
         assert fps == 0 if mode == 'pause' else fps > 5
         print(f'{mode}: {used:.2f}% one core, {rss/1024:.1f} MiB RSS, {fps:.1f} FPS')
+
+
+def benchmark(w):
+    measurements = samples(w)
+    def advance():
+        try:
+            delay = next(measurements)
+        except StopIteration:
+            print('PASS: all three native frame samples.', flush=True)
+            w.shutdown()
+            QApplication.quit()
+        except Exception:
+            traceback.print_exc()
+            QApplication.exit(1)
+        else:
+            QTimer.singleShot(delay, advance)
+    QTimer.singleShot(0, advance)
+    return QApplication.instance().exec()
 
 
 if __name__ == '__main__':
@@ -179,5 +210,4 @@ if __name__ == '__main__':
         w.show()
         wait(300)
         checks(w)
-        benchmark(w)
-        w.shutdown()
+        sys.exit(benchmark(w))

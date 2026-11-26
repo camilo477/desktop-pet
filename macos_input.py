@@ -62,6 +62,7 @@ class MacInput:
         self.status = 'off'
         self.enabled = False
         self.held = set()
+        self.caps_latched = None
         self.motion_after = 0
         self.tap = self.source = None
         self.next_check = self.next_reconcile = 0.
@@ -114,6 +115,7 @@ class MacInput:
             CF.CFMachPortInvalidate(self.tap)
         self.source = self.tap = None
         self.held.clear()
+        self.caps_latched = None
         self.monitor.clear_input()
 
     def connect(self):
@@ -185,8 +187,11 @@ class MacInput:
             code = FIELD(event, CG.kCGKeyboardEventKeycode)
             if kind == CG.kCGEventFlagsChanged:
                 if code == 57:  # Caps Lock is latched; never leave a paw held.
-                    self.monitor.key_down('CapsLock', (code,))
-                    self.up(code)
+                    latched = bool(CG.CGEventGetFlags(event) & CG.kCGEventFlagMaskAlphaShift)
+                    if self.caps_latched != latched:
+                        self.caps_latched = latched
+                        self.monitor.key_down('CapsLock', (code,))
+                        self.up(code)
                     return event
                 if code not in MODIFIERS and code != 63:
                     return event
