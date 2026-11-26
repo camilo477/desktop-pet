@@ -7,6 +7,7 @@ import random
 from activity import Activity, KeyHint
 from keyboard_layout import BY_ID, KEY_TRAVEL
 from anatomy import BodyGeometry, FaceGeometry
+from personality import CALM, Expression, Personality
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
@@ -47,6 +48,8 @@ class Pose:
     blink: float = 0.0
     tail: float = 0.0
     tail_phase: float = 0.0
+    tail_tip: float = 0.0
+    expression: Expression = CALM
     gaze_x: float = 0.0
     gaze_y: float = 0.0
     head_x: float = 0.0
@@ -140,6 +143,8 @@ class Paw:
 class Animations:
     def __init__(self):
         self.pose = Pose()
+        self.personality = Personality()
+        self.tip_phase = 0.0
         self.time = 0.0
         self.paws = [Paw(*LEFT_REST), Paw(*RIGHT_REST)]
         self.last_activity = None
@@ -184,6 +189,8 @@ class Animations:
         self.next_tail = self.time + random.uniform(10, 20)
 
     def clear_input(self):
+        # Clear the input estimates immediately, keeping the painted pose for the transition.
+        self.personality = Personality(self.personality.shape)
         self.pose.pressed = frozenset()
         self.pose.left_key = self.pose.right_key = None
         self.pose.scroll = self.pose.contact = 0.0
@@ -324,6 +331,7 @@ class Animations:
         observed = max(activity.keyboard, activity.mouse, activity.click, activity.scroll)
         if self.last_activity is None:
             self.last_activity = now
+        prior_idle = now - self.last_activity
         active = activity.any_held or bool(activity.held) or observed > self.last_activity or self.touch_pending
         if self.sleeping and active:
             dt = min(dt, 1 / 30)  # Restore fluid wake frames after the low-rate sleeping tick.
@@ -339,20 +347,28 @@ class Animations:
         phase, action, playing = self._expressions(dt, idle, active)
         relaxing = max(0, min(1, (idle - RELAX_AFTER) / (SLEEP_AFTER - RELAX_AFTER)))
         pose.relax = approach(pose.relax, relaxing, .8 if relaxing > pose.relax else 6, dt)
+        expression = self.personality.update(dt, now, activity, prior_idle,
+                                             playing and self.action_kind == 'look', pose.pet, pose.relax)
+        pose.expression = expression
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
         pose.sleep = approach(pose.sleep, self.sleep_goal, 2.4 if sleep_target else 12, dt)
         # The eyelids can open while the slower torso is still uncurling.
-        pose.blink = max(pose.blink, smoothstep((self.sleep_goal - .35) / .65))
+        pose.blink = max(pose.blink, .64 * pose.relax, smoothstep((self.sleep_goal - .35) / .65))
         pose.zzz = approach(pose.zzz, smoothstep((pose.sleep - .78) / .22) if sleep_target else 0, 8, dt)
         pose.breath = math.sin(self.time * math.tau / mix(4.2, 6.2, pose.sleep)) * mix(1, .4, pose.sleep)
         if self.sleeping and sleep_target and not active:
             pose.blink = 1.0; pose.tail = 0.0
+            pose.tail_tip = 0.0
             pose.ear_left = pose.ear_right = 0.0
             pose.gaze_x = pose.gaze_y = pose.head_x = pose.head_y = 0.0
             self.head_velocity[:] = (0.0, 0.0, 0.0)
             pose.pressed = frozenset()
             return pose
+        self.tip_phase = (self.tip_phase + expression.tip_speed * dt) % (3 * math.tau)
+        # A flexible tip moves in bouts; the root stays planted.
+        bout = (.5 - .5 * math.cos(self.tip_phase / 3))
+        pose.tail_tip = expression.tail * math.sin(self.tip_phase) * bout * (1 - pose.sleep)
         mouse_active = now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 10, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 12, dt)
@@ -402,9 +418,12 @@ class Animations:
         pose.gaze_x = approach(pose.gaze_x, look[0], 24, dt)
         pose.gaze_y = approach(pose.gaze_y, look[1], 24, dt)
         head_speed = 13 if key_point else 11
+        if not key_point and not mouse_active:
+            head_speed *= 1 - .35 * pose.relax
         pose.head_x, self.head_velocity[0] = spring(pose.head_x, self.head_velocity[0], look[0], head_speed, dt)
         pose.head_y, self.head_velocity[1] = spring(pose.head_y, self.head_velocity[1], look[1], head_speed, dt)
-        tilt = look[0] * 3.5 + pose.pet_side * pose.pet * 8
+        toward = max(-1, min(1, look[0] * 1.8))
+        tilt = look[0] * 3.5 + toward * expression.tilt + pose.pet_side * pose.pet * 8
         if playing and self.action_kind == 'look':
             tilt += self.look_side * action * 2
         pose.head_tilt, self.head_velocity[2] = spring(pose.head_tilt, self.head_velocity[2], tilt, 14, dt)
@@ -423,13 +442,14 @@ class Animations:
         if pose.groom > 0:
             target_x -= pose.groom * 1.6
             target_y += pose.groom * 1.8
-        target_y += pose.relax * 1.2 - pose.yawn * .6
+        target_y += pose.relax * 1.2 - pose.yawn * .6 + expression.lean
         old_balance = pose.balance_x
         pose.balance_x = approach(pose.balance_x, target_x * (1 - pose.sleep), 10, dt)
         pose.balance_y = approach(pose.balance_y, target_y * (1 - pose.sleep), 10, dt)
         pose.balance_velocity = (pose.balance_x - old_balance) / max(.001, dt)
-        pose.ear_left += pose.balance_velocity * .013
-        pose.ear_right += pose.balance_velocity * .009
+        swivel = toward * expression.tilt * .6
+        pose.ear_left += (swivel - expression.ears) * (1 - pose.sleep) + pose.balance_velocity * .013
+        pose.ear_right += (swivel + expression.ears) * (1 - pose.sleep) + pose.balance_velocity * .009
         body = BodyGeometry(pose)
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):

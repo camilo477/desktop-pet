@@ -18,8 +18,9 @@ class BodyGeometry:
     def __init__(self, pose):
         self.sleep = smooth(pose.sleep)
         self.x = pose.balance_x + pose.contact_side * pose.contact * .45
+        contact_dip = pose.contact * (1.25 + max(0, pose.expression.opening - 1) * 2)
         self.y = (pose.balance_y + pose.relax * 1.2 - pose.breath * .55
-                  + pose.pet * 1.1 + pose.contact * 1.25)
+                  + pose.pet * 1.1 + contact_dip)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
         self.mouse_reach = pose.mouse * (1 - self.sleep)
 
@@ -70,7 +71,7 @@ class FaceGeometry:
         self.cx, self.cy = body.head
         awake = 1 - self.sleep
         self.yaw = pose.head_x * .46 * awake
-        self.pitch = (pose.head_y * .34 + pose.contact * .025) * awake
+        self.pitch = (pose.head_y * .34 + pose.expression.pitch + pose.contact * .025) * awake
         self.roll = math.radians(pose.head_tilt * awake)
         self.cy += pose.pet * 2 + pose.groom * .8
         self.scale = mix(.92, 1.0, self.sleep)

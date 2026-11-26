@@ -21,18 +21,29 @@ activity in a transparent window without taking keyboard focus.
 - The mouse travels across a bounded area with its paw, then stays where it was left.
 - Scrolling reaches and holds the mouse without moving it; the other paw can type.
 - Coordinated eyes, head, whiskers, torso, ears and flexible tail, at up to 30 FPS.
+- Eight procedural expressions: calm, focused, excited, impatient, surprised,
+  curious, contented during head pats, and drowsy as Miga settles down.
+- Eye aperture, feline pupil width, ear angle and tail-tip motion change together.
+  Physical key cadence is smoothed over roughly one second. Gentle typing keeps
+  Miga relaxed. Sustained typing above about four presses per second can bring
+  concentration, faster bursts can bring excitement, and sustained activity
+  above roughly nine can occasionally bring a few seconds of impatience.
+- A sudden resumption can briefly widen Miga's eyes. Pointer travel and scrolling
+  have separate intensity measurements. Holding a key keeps the paw planted.
 - Eyes and head respond independently to shared attention; facial features use
   a small projected surface to follow turns and downward glances.
 - Occasional grooming, face washing, yawning, glancing and small posture changes.
 - Gradual relaxation and a tucked sleeping posture with slow breathing and small Zzz.
-- Smooth interruption of grooming and sleep when activity resumes.
+- Current input redirects the paws during grooming, yawning and waking. Pressed
+  keys light up on the next frame while the eyes open and the torso uncurls.
 - Head pats with a brief coordinated squint and lean, dragging, and clicks through empty areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
 
 Input processing is entirely local. It keeps only currently held physical key
-identifiers, brief visual markers, the latest paw targets and activity timestamps
-in memory. It does not reconstruct text, keep a typing history, write input logs,
+identifiers, brief visual markers, the latest paw targets, activity timestamps
+and short-lived aggregate rates in memory. It does not reconstruct text,
+keep a typing history, write input logs,
 send telemetry or connect to the internet. **Reaccionar a actividad** disables
 input listeners and immediately clears input state. Pausing also stops listeners
 and clears held keys.

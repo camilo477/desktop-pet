@@ -1,9 +1,11 @@
 """Essential checks: run with .venv/bin/python tests/smoke.py."""
 
 import fcntl
+from dataclasses import replace
 import math
 import os
 from pathlib import Path
+import random
 import sys
 from tempfile import TemporaryDirectory
 
@@ -22,6 +24,7 @@ from main import instance_busy
 from pet import PetWindow, visible_position
 from anatomy import BodyGeometry, FaceGeometry, MAX_REACH
 from character import CatArt
+from personality import CALM, CURIOUS, EXCITED, FOCUSED, IMPATIENT, SURPRISED
 
 
 def check_window() -> None:
@@ -262,9 +265,10 @@ def check_responsiveness() -> None:
                     previous = press
                 pose = animation.advance(1 / 30, now, Activity(
                     keyboard=hint.stamp, key_interval=1 / rate, latest=hint,
+                    new_presses=int(fresh),
                     pulses=frozenset({hint.identifier}), mouse=now if using_mouse else -float('inf')))
                 if fresh:
-                    assert hint.identifier in (pose.left_key, pose.right_key)
+                    assert hint.identifier in pose.pressed and hint.identifier in (pose.left_key, pose.right_key)
                 if using_mouse:
                     assert pose.left_key is None and pose.right_key in (hint.identifier, None)
                     if animation.mouse_contact:
@@ -273,6 +277,47 @@ def check_responsiveness() -> None:
             for frame in range(9):
                 pose = animation.advance(1 / 30, 3 + frame / 30)
             assert pose.left_key is None and pose.right_key is None and not pose.pressed
+
+
+def check_personality() -> None:
+    random.seed(17)
+    animation = Animations()
+    now = 0.0
+    states = set()
+    for rate, seconds in ((3, 5), (6, 6), (15, 55)):
+        for frame in range(seconds * 30):
+            now += 1 / 30
+            edge = int((frame + 1) * rate / 30) - int(frame * rate / 30)
+            pose = animation.advance(1 / 30, now, Activity(new_presses=edge, keyboard=now))
+            state = animation.personality.state
+            if rate == 3:
+                assert state is CALM
+            if rate == 15:
+                states.add(state)
+            assert not pose.pressed and not pose.contacts  # An expression cannot manufacture a stroke.
+        assert abs(animation.personality.rate - rate) < .7
+        if rate == 6:
+            assert state is FOCUSED
+    assert {FOCUSED, EXCITED, IMPATIENT} <= states
+    for _ in range(300):
+        now += 1 / 30
+        pose = animation.advance(1 / 30, now, Activity(held=frozenset({'W'})))
+    assert animation.personality.rate < .001 and pose.expression is CALM
+    press = now + 7
+    animation.advance(1 / 30, press)
+    for frame in range(40):
+        now = press + (frame + 1) / 30
+        pose = animation.advance(1 / 30, now, Activity(mouse=now, pointer_distance=150, motion_x=10))
+        if frame == 0:
+            assert animation.personality.state is SURPRISED
+        assert not pose.pressed and not pose.contacts
+    assert animation.personality.state is CURIOUS
+    for frame in range(40):
+        now += 1 / 30
+        pose = animation.advance(1 / 30, now)
+    assert pose.expression is CALM and not animation.mouse_contact
+    animation.clear_input()
+    assert animation.personality.rate == animation.personality.pointer_speed == 0
 
 
 def check_geometry_and_contacts() -> None:
@@ -373,6 +418,48 @@ def check_geometry_and_contacts() -> None:
     for side, point in ((-1, (pose.left_x, pose.left_y)), (1, (pose.right_x, pose.right_y))):
         assert math.dist(BodyGeometry(pose).shoulder(side), point) <= MAX_REACH + .1
 
+    def painted(pose):
+        image = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image); art.draw(painter, pose); painter.end()
+        return image
+
+    # Inspect the actual first wake frame, including the key before its paw lands.
+    for source in ('keyboard', 'mouse', 'scroll'):
+        animation = Animations()
+        animation.last_activity = 0
+        for frame in range(65):
+            animation.advance(.1, 200 + frame / 10)
+        assert animation.sleeping
+        now = 207
+        waking = Activity(**{source: now})
+        if source == 'keyboard':
+            waking = replace(waking, pulses=frozenset({'A'}), latest=KeyHint('A', now), new_presses=1)
+        pose = animation.advance(.1, now, waking)
+        image = painted(pose)
+        assert pose.sleep > .8 and not pose.contacts and not animation.mouse_contact
+        assert any(image.pixel(x, y) == art.iris.rgba() for y in range(118, 139) for x in range(85, 137))
+        if source == 'keyboard':
+            key_area = art.key_paths['A'].boundingRect().adjusted(-1, -1, 1, 2).toAlignedRect()
+            assert image.copy(key_area) != painted(replace(pose, pressed=frozenset())).copy(key_area)
+            assert 'A' in (pose.left_key, pose.right_key)
+        else:
+            assert animation.paws[0].goal == 'mouse' and pose.left_x < 90 and not pose.pressed
+
+    for kind, source in (('wash', 'keyboard'), ('lick', 'keyboard'), ('yawn', 'mouse')):
+        animation = Animations()
+        animation.last_activity = 0
+        animation.start_idle(kind)
+        for frame in range(46):
+            animation.advance(1 / 30, 25 + frame / 30)
+        assert max(animation.pose.groom, animation.pose.yawn) > .7
+        event = (Activity(keyboard=27, held=frozenset({'P'}), latest=KeyHint('P', 27))
+                 if source == 'keyboard' else Activity(mouse=27, motion_x=10))
+        pose = animation.advance(1 / 30, 27, event)
+        goals = {paw.goal for paw in animation.paws}
+        assert 'groom' not in goals and ('P' if source == 'keyboard' else 'mouse') in goals
+        assert max(pose.groom, pose.yawn) > 0 and not pose.contacts
+
 
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="desktop-pet-checks-") as directory:
@@ -384,6 +471,8 @@ if __name__ == "__main__":
         check_window()
         check_motion_and_screens()
         check_responsiveness()
+        check_personality()
         check_geometry_and_contacts()
         check_instance_lock()
-    print("PASS: rendering, window controls, preferences, 105 keys, held input, contacts, eight painted mouse directions, scroll, shared paws, grooming, sleep, screens and lock.")
+    print("PASS: window controls, preferences, 105 keys, physical cadence, expressions, contacts, "
+          "painted mouse directions, scroll, shared paws, idle interruptions, rendered wake, screens and lock.")

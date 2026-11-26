@@ -187,6 +187,7 @@ class CatArt:
             amplitude = (pose.tail * 2.4 + pose.pet * .8 + abs(pose.balance_velocity) * .012) * (1 - sleep)
             x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
             y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
+            y += pose.tail_tip * weight * weight
             warped.append(body.map(x, y))
         p.drawPath(curve(warped))
 
@@ -295,18 +296,25 @@ class CatArt:
         for side in (-1, 1):
             ex, ey = side * mix(13.7, 10, s), -1.15
             width = mix(8.45, 7.8, s)
-            top, bottom = mix(-9.6, 1.1, blink), mix(8.1, 1.1, blink)
-            aperture = curve([face.point(ex - width, ey), face.point(ex - width * .65, ey + top),
-                              face.point(ex + width * .65, ey + top), face.point(ex + width, ey),
-                              face.point(ex + width * .65, ey + bottom), face.point(ex - width * .65, ey + bottom),
-                              face.point(ex - width, ey)])
+            opening = pose.expression.opening
+            top = mix(-9.6 * opening, 1.1, blink)
+            bottom = mix(8.1 * (.4 + .6 * opening), 1.1, blink)
+            slope = side * pose.expression.slant * (1 - blink)
+            left, right = face.point(ex - width, ey + slope * .55), face.point(ex + width, ey - slope * .55)
+            aperture = curve([left, face.point(ex - width * .65, ey + top + slope),
+                              face.point(ex + width * .65, ey + top - slope), right,
+                              face.point(ex + width * .65, ey + bottom - slope * .3),
+                              face.point(ex - width * .65, ey + bottom + slope * .3), left])
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.iris); p.drawPath(aperture)
             p.save(); p.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
             px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5 * (1 - s)
             py = ey + pose.gaze_y * 2.0 * (1 - s)
-            pupil = curve([face.point(px, py - 7), face.point(px - 2.3, py - 3),
-                           face.point(px - 2.3, py + 3), face.point(px, py + 7),
-                           face.point(px + 2.3, py + 3), face.point(px + 2.3, py - 3), face.point(px, py - 7)])
+            radius = pose.expression.pupil
+            height = 7 + max(0, opening - 1) * 4
+            pupil = curve([face.point(px, py - height), face.point(px - radius, py - 3),
+                           face.point(px - radius, py + 3), face.point(px, py + height),
+                           face.point(px + radius, py + 3), face.point(px + radius, py - 3),
+                           face.point(px, py - height)])
             p.setBrush(self.pupil); p.drawPath(pupil); p.restore()
             if blink > .85:
                 lid = QPainterPath(); lid.moveTo(*face.point(ex - width, ey))
@@ -328,7 +336,8 @@ class CatArt:
                 p.setBrush(QColor('#b87e86')); p.drawPath(tongue)
         p.restore()
         for side in (-1, 1):
-            flex = pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5 + pose.balance_velocity * .006
+            flex = (pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5
+                    + pose.balance_velocity * .006 + pose.expression.whiskers * (1 - s))
             p.setPen(QPen(self.whisker, .65, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.setBrush(Qt.BrushStyle.NoBrush)
             for level in (-1, 1):

@@ -182,6 +182,7 @@ class PetWindow(QWidget):
                      round(pose.ear_left * 2), round(pose.ear_right * 2),
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
                      round(pose.tail * math.cos(pose.tail_phase) * 20),
+                     round(pose.tail_tip * 2),
                      round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
                      round(pose.contact * 15), round(pose.mouse_dx * 2), round(pose.mouse_dy * 2),
                      round(pose.groom * 20), round(pose.yawn * 20))
