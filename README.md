@@ -2,8 +2,17 @@
 
 An original charcoal cat sitting on an invisible floor with a small keyboard
 and mouse. Miga uses Python, PySide6 and SVG to accompany your activity in a
-transparent desktop window. Linux and Windows share the same cat, keyboard,
+transparent desktop window. Linux, Windows and macOS share the same cat, keyboard,
 appearances, gestures and animation code.
+
+## Platform status
+
+| Platform | Available integration | Automated and native checks | Hands-on validation remaining |
+| --- | --- | --- | --- |
+| Linux X11 | Global physical input and XKB | Native X11 input, Qt rendering and launcher | Additional desktops and monitor arrangements |
+| Linux Wayland | Local interaction, manual layouts | Nested Weston and shared Qt tests | Compositor-specific placement and topmost behavior |
+| Windows x64 | Raw Input, installer and portable folder | Windows Server 2025 x64, native input and packaging | Windows 11/10 client desktops and hardware |
+| macOS arm64 and x86_64 | Cocoa panel, optional Quartz input, Finder app and CLI | macOS 15 on both architectures, synthetic input through the session tap, transparent hit targets, app builds and local IPC | Granting and revoking permission, physical input devices, Secure Input, Spaces and mixed-DPI displays |
 
 ## Features
 
@@ -14,7 +23,7 @@ appearances, gestures and animation code.
   Each keycap supplies the target for the paw and the highlight for a press.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
   mouse appears on the viewer's left.
-- Actual key presses, holds and releases on X11 and Windows, including simultaneous keys.
+- Actual key presses, holds and releases on X11, Windows and permitted macOS sessions, including simultaneous keys.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Typing speed follows actual press cadence and reach distance, with continuous
   redirection instead of queued strokes.
@@ -61,6 +70,7 @@ and clears held keys.
 
 Python 3, PySide6 (Qt Widgets, Qt SVG, local IPC and QSettings) and original
 SVG artwork. X11 uses pynput. Windows uses Raw Input through ctypes.
+macOS uses the PyObjC Quartz and Cocoa bindings and native Text Input Source Services.
 The application uses PySide6 Essentials.
 
 ## Linux requirements
@@ -119,6 +129,27 @@ transparent hit targets at five scale factors, concurrent starts, orderly
 shutdown and the portable build. Physical Windows 11/10 desktops, mixed-DPI
 monitor transitions, secure desktops and hardware sleep/resume still need
 hands-on validation. [Windows test runs](https://github.com/camilo477/desktop-pet/actions/workflows/windows.yml).
+
+## macOS installation and status
+
+Miga targets macOS **15 or later**, with separate native Apple Silicon and Intel
+apps. With native Python 3.12 and Apple command line tools, run
+`./macos/install.sh` in the project folder. Open **Miga** in your personal
+Applications folder, or put `~/.local/bin` on PATH and run `miga`. Use
+`miga off` to quit and `./macos/uninstall.sh` to remove the installation.
+
+Global input is optional. Miga checks Input Monitoring access and offers a
+permission request in its context menu. With access, a listen-only Quartz
+session tap feeds physical positions, pointer motion and both wheel axes to
+the shared animation controller. Without access, local petting, dragging,
+customization and idle behavior remain available. The automatic keyboard
+uses known input source IDs. An unknown source shows the US fallback, and all
+eight supported layouts are available manually.
+
+`./macos/build.sh` produces a standalone, ad-hoc-signed development app.
+Developer ID signing and Apple notarization are pending.
+[Mac installation, permissions and manual checks](MACOS.md) ·
+[Native Mac test runs](https://github.com/camilo477/desktop-pet/actions/workflows/macos.yml).
 
 ## Usage
 
