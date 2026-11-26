@@ -449,7 +449,7 @@ class Animations:
         pose.mouse_dx, pose.mouse_dy = positions
 
     def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0), face_offset=None,
-                drag_delta=(0.0, 0.0)):
+                drag_delta=(0.0, 0.0), desktop_idle=None):
         pose = self.pose
         if self.carried:
             self.interact()
@@ -470,7 +470,13 @@ class Animations:
         else:
             self.last_activity = max(self.last_activity, observed)
         self.touch_pending = False
+        if desktop_idle is not None:
+            # Before the idle edge we only know the seat was active within 15s.
+            # Keep that bound for fallback without synthesizing input or cadence.
+            self.last_activity = max(self.last_activity, now - max(IDLE_ACTION_AFTER, desktop_idle))
         idle = max(0, now - self.last_activity)
+        if desktop_idle is not None:
+            idle = min(idle, desktop_idle)
         phase, action, playing = self._expressions(dt, idle, active)
         relaxing = max(0, min(1, (idle - RELAX_AFTER) / (SLEEP_AFTER - RELAX_AFTER)))
         pose.relax = approach(pose.relax, relaxing, .8 if relaxing > pose.relax else 6, dt)

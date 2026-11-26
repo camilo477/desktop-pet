@@ -56,6 +56,7 @@ class PetWindow(QWidget):
         # Cocoa needs a native shape for clicks to reach other windows.
         self.mask_supported = platform in ("xcb", "cocoa") or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
+        self.wayland = None
         self.native_windows = platform == "windows"
         self.windows_input = None
         self.global_input = supports_global_input(platform)
@@ -102,6 +103,7 @@ class PetWindow(QWidget):
         self.dragging = False
         self.system_drag = False
         self.native_anchor = None
+        self.native_motion_time = None
         self.drag_sample = None
         self.frame = QPixmap()
         self.last_mask = QRegion()
@@ -129,6 +131,14 @@ class PetWindow(QWidget):
         app.screenRemoved.connect(lambda screen: QTimer.singleShot(0, self.ensure_visible))
         for screen in app.screens():
             self.watch_screen(screen)
+        if self.native_wayland:
+            from wayland_activity import WaylandActivity
+            self.wayland = WaylandActivity(self)
+            preferred = self.settings.value('wayland/screen', '', type=str)
+            for screen in app.screens():
+                if preferred and screen.name() == preferred:
+                    self.setScreen(screen)
+                    break
         if self.global_input and self.native_windows:
             from windows_input import WindowsInput
             self.windows_input = WindowsInput(self.activity)
@@ -160,6 +170,8 @@ class PetWindow(QWidget):
 
     def refresh_activity(self) -> None:
         self.activity.set_enabled(self.reactions and not self.paused)
+        if self.wayland:
+            self.wayland.configure(self.activity.enabled)
         if self.windows_input:
             self.windows_input.configure(int(self.winId()) if self.activity.enabled else None)
         if self.mac_input:
@@ -218,8 +230,11 @@ class PetWindow(QWidget):
             position = self.pos()
             motion = position - self.drag_sample
             delta = (motion.x(), motion.y())
+            if self.system_drag and not motion.isNull():
+                self.native_motion_time = now
             self.drag_sample = position
-        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze, offset, delta)
+        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze, offset, delta,
+                                desktop_idle=self.wayland.idle(now) if self.wayland else None)
         interval = 100 if self.animations.sleeping else 34
         if self.timer.interval() != interval:
             self.timer.setInterval(interval)
@@ -355,11 +370,13 @@ class PetWindow(QWidget):
                 self.drag_sample = self.pos()
             if self.native_wayland and self.windowHandle():
                 self.native_anchor = event.position().toPoint()
+                self.native_motion_time = time.monotonic()
                 started = self.windowHandle().startSystemMove()
+                self.wayland.drag_accepted = started
                 self.system_drag = started and self.dragging
                 if self.system_drag:
                     self.position_timer.start()
-        if self.dragging and not self.system_drag:
+        if self.dragging and not self.system_drag and not self.native_wayland:
             self.move(self.press_origin + delta)
 
     def wheelEvent(self, event) -> None:
@@ -390,11 +407,13 @@ class PetWindow(QWidget):
             self.finish_drag()
 
     def check_native_release(self) -> None:
-        # Some backends clear Qt's button state as soon as they hand off the
-        # grab. Wait for pointer focus to return. If the grip is now outside
-        # the painted mask, the compositor may never send that enter event.
+        # Qt can clear its button state as the compositor takes the grab. Give
+        # re-entry, local motion or a real release time to settle the pose.
+        # Bound only our visual grip if the compositor withholds the final event.
         if (self.system_drag and self.native_anchor is not None
-                and not self.last_mask.contains(self.native_anchor)
+                and (not self.last_mask.contains(self.native_anchor)
+                     or (self.native_motion_time is not None
+                         and time.monotonic() - self.native_motion_time >= 6))
                 and not QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
             self.finish_drag()
 
@@ -422,6 +441,7 @@ class PetWindow(QWidget):
         self.dragging = False
         self.system_drag = False
         self.native_anchor = None
+        self.native_motion_time = None
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         if moved:
             self.ensure_visible()
@@ -470,7 +490,11 @@ class PetWindow(QWidget):
         self.save_preferences()
 
     def save_preferences(self) -> None:
-        for key, value in (("position", self.pos()), ("size", self.width()),
+        if not self.native_wayland:
+            self.settings.setValue("position", self.pos())
+        elif self.screen() and self.screen().name():
+            self.settings.setValue("wayland/screen", self.screen().name())
+        for key, value in (("size", self.width()),
                            ("always_on_top", self.always_on_top),
                            ("reactions", self.reactions), ("paused", self.paused)):
             self.settings.setValue(key, value)
@@ -514,6 +538,8 @@ class PetWindow(QWidget):
     def keyboard_menu(self, parent):
         menu = parent.addMenu('Teclado')
         auto_name = DISTRIBUTIONS.get(self.detected_layout, 'sin identificar · muestra EE. UU.')
+        if self.wayland and self.detected_layout and self.wayland.layout_source:
+            auto_name += f' · {self.wayland.layout_source}'
         if self.detected_layout and (self.paused or not self.reactions):
             auto_name = f'última conocida · {auto_name}'
         layouts = {'auto': f'Automática ({auto_name})', **DISTRIBUTIONS}
@@ -571,6 +597,8 @@ class PetWindow(QWidget):
             action.triggered.connect(lambda checked, value=size: self.set_size(value))
         self.keyboard_menu(menu)
         self.appearance_menu(menu)
+        if self.wayland:
+            self.wayland.menu(menu)
         if self.mac_input:
             from macos_window import permission_menu
             permission_menu(self, menu)
@@ -624,6 +652,8 @@ class PetWindow(QWidget):
         self.position_timer.stop()
         if self.windows_input:
             self.windows_input.configure(None)
+        if self.wayland:
+            self.wayland.configure(False)
         if self.mac_input:
             self.mac_input.close()
         self.activity.stop()

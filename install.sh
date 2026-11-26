@@ -31,6 +31,13 @@ if [[ ! -x "$venv_python" ]]; then
     fi
 fi
 "$venv_python" -m pip install --disable-pip-version-check -r "$project_dir/requirements.txt"
+# Optional desktop observers. Use wheels so a missing platform build never
+# requires a compiler or prevents the local pet from running.
+while IFS= read -r requirement; do
+    if ! "$venv_python" -m pip install --disable-pip-version-check --only-binary=:all: "$requirement"; then
+        printf '%s\n' "Optional Wayland integration unavailable: ${requirement%%;*}" >&2
+    fi
+done < "$project_dir/requirements-wayland.txt"
 chmod +x "$project_dir/miga"
 mkdir -p -- "$bin_dir"
 if [[ ! -e "$command_path" && ! -L "$command_path" ]]; then

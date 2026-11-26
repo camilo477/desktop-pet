@@ -1,0 +1,2 @@
+dbus-next==0.2.3; sys_platform == "linux"
+pywayland==0.4.19; sys_platform == "linux"
