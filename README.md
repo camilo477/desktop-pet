@@ -6,7 +6,8 @@ activity in a transparent window without taking keyboard focus.
 
 ## Features
 
-- Minimal flat silhouettes, grounded haunches and continuous tapered forelegs.
+- Minimal charcoal silhouettes, warm golden eyes, grounded haunches and
+  subtle flat shading that follows the body and its continuous forelegs.
 - A shared body deformation keeps the chest, neck, shoulders and head connected.
 - A full-size 105-key QWERTY keyboard, including function keys, navigation and
   a separate number pad. Key shapes also define the paws' contact targets.

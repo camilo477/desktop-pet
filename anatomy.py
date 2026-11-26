@@ -42,7 +42,7 @@ class BodyGeometry:
 
     @property
     def head(self):
-        return self.map(mix(103, 110, self.sleep), mix(75, 131, self.sleep))
+        return self.map(mix(103, 110, self.sleep), mix(76.5, 131, self.sleep))
 
     @property
     def tail_base(self):
