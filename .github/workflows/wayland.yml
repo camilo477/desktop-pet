@@ -1,0 +1,49 @@
+name: Wayland compositor checks
+on: workflow_dispatch
+permissions:
+  contents: read
+
+jobs:
+  kwin:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt -r requirements-wayland.txt
+          .venv/bin/python tests/wayland.py
+      - name: Extract KWin in the runner's temporary directory
+        run: |
+          stage="$RUNNER_TEMP/kwin"
+          mkdir -p "$stage"/{lists/partial,archives/partial,root,apt.conf.d}
+          opts=(-o Debug::NoLocking=true -o Dir::State::lists="$stage/lists" -o Dir::Cache::archives="$stage/archives" -o Dir::Etc::parts="$stage/apt.conf.d")
+          apt-get "${opts[@]}" update -qq
+          apt-get "${opts[@]}" --no-install-recommends --download-only -y install kwin-wayland qt6-wayland
+          for deb in "$stage"/archives/*.deb; do dpkg-deb -x "$deb" "$stage/root"; done
+      - name: Exercise a private KWin session
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/miga-runtime" XDG_CONFIG_HOME="$RUNNER_TEMP/miga-config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/miga-data" XDG_CACHE_HOME="$RUNNER_TEMP/miga-cache"
+          mkdir -m 700 -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME"
+          printf '[Layout]\nUse=true\nLayoutList=us,de,us\nVariantList=,,dvorak\n' > "$XDG_CONFIG_HOME/kxkbrc"
+          dbus-run-session -- bash -eu -o pipefail -c '
+            stage="$RUNNER_TEMP/kwin/root/usr"
+            libs="$stage/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+            export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=miga-ci
+            export XDG_DATA_DIRS="$stage/share:/usr/local/share:/usr/share"
+            LD_LIBRARY_PATH="$libs" QT_PLUGIN_PATH="$libs/qt6/plugins" QML_IMPORT_PATH="$libs/qt6/qml" \
+              "$stage/bin/kwin_wayland" --virtual --socket miga-ci --width 1000 --height 700 >"$RUNNER_TEMP/kwin.log" 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            for n in {1..100}; do
+              if ! kill -0 "$pid"; then tail -30 "$RUNNER_TEMP/kwin.log"; exit 1; fi
+              test -S "$XDG_RUNTIME_DIR/miga-ci" && break
+              sleep .2
+            done
+            QT_QPA_PLATFORM=wayland .venv/bin/python tests/kwin.py
+          '
