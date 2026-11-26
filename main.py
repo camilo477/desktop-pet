@@ -32,7 +32,7 @@ def runtime_directory() -> Path:
     info = directory.lstat()
     if not (stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
             and not info.st_mode & 0o077):
-        raise RuntimeError("La carpeta temporal de mascota debe ser privada y pertenecer al usuario.")
+        raise RuntimeError("La carpeta temporal de Miga debe ser privada y pertenecer al usuario.")
     if len(os.fsencode(directory / "control.sock")) >= 104:
         raise RuntimeError("La ruta temporal es demasiado larga para el canal de control local.")
     return directory
@@ -48,7 +48,7 @@ def request(server_name: str, command: bytes) -> bytes | None:
     client.flush()
     if not client.canReadLine() and not client.waitForReadyRead(1500):
         client.abort()
-        raise RuntimeError("La instancia de mascota no responde al comando.")
+        raise RuntimeError("La instancia de Miga no responde al comando.")
     reply = bytes(client.readLine(64)).strip()
     expected = b"BYE" if command == b"off" else b"OK"
     if reply != expected:
@@ -57,7 +57,7 @@ def request(server_name: str, command: bytes) -> bytes | None:
     if command == b"off" and client.state() != QLocalSocket.LocalSocketState.UnconnectedState:
         if not client.waitForDisconnected(4000):
             client.abort()
-            raise RuntimeError("La mascota recibió la orden, pero todavía no ha terminado de cerrar.")
+            raise RuntimeError("Miga recibió la orden, pero todavía no ha terminado de cerrar.")
     client.abort()
     return reply
 
@@ -164,14 +164,14 @@ def serve(directory: Path, ready_fd: int | None) -> int:
                 client.abort()
             server.close()
         if ready_fd is not None:
-            notify(ready_fd, "ERROR: No se pudo iniciar la mascota.")
+            notify(ready_fd, "ERROR: No se pudo iniciar Miga.")
         os.close(lock_fd)
 
 
 def launch(directory: Path) -> int:
     server_name = str(directory / "control.sock")
     if request(server_name, b"ping") is not None:
-        print("La mascota ya está en ejecución.")
+        print("Miga ya está en ejecución.")
         return 0
     read_fd, write_fd = os.pipe()
     try:
@@ -188,7 +188,7 @@ def launch(directory: Path) -> int:
     finally:
         os.close(read_fd)
     if message in ("READY", "ALREADY"):
-        print("Mascota iniciada." if message == "READY" else "La mascota ya se está iniciando.")
+        print("Miga iniciada." if message == "READY" else "Miga ya se está iniciando.")
         return 0
     if child.poll() is None:
         child.terminate()
@@ -200,16 +200,17 @@ def launch(directory: Path) -> int:
     else:
         child.wait()
     raise RuntimeError(message.removeprefix("ERROR: ") or
-                       "No se pudo iniciar la mascota. Comprueba las dependencias y la sesión gráfica.")
+                       "No se pudo iniciar Miga. Comprueba las dependencias y la sesión gráfica.")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="mascota", description="Miga, tu pequeña compañía de escritorio.")
-    parser.add_argument("command", nargs="?", choices=("off",), help="cerrar la mascota")
+    parser = argparse.ArgumentParser(prog="miga", description="Miga, tu pequeña compañía de escritorio.")
+    parser.add_argument("command", nargs="?", choices=("off",), help="cerrar Miga")
     parser.add_argument("--run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--ready-fd", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     QCoreApplication.setOrganizationName("desktop-pet")
+    # Keep the original settings namespace across the launcher rename.
     QCoreApplication.setApplicationName("mascota")
     try:
         directory = runtime_directory()
@@ -223,17 +224,17 @@ def main() -> int:
             # The GUI may own the lock while it is still preparing its window.
             while reply is None and instance_busy(directory):
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("La mascota sigue iniciándose; no ha podido recibir la orden de cierre.")
+                    raise RuntimeError("Miga sigue iniciándose; no ha podido recibir la orden de cierre.")
                 time.sleep(0.05)
                 reply = request(server_name, b"off")
-            print("Mascota cerrada." if reply is not None else "La mascota no está en ejecución.")
+            print("Miga cerrada." if reply is not None else "Miga no está en ejecución.")
             return 0
         return launch(directory)
     except (OSError, RuntimeError) as error:
         if args.run:
             notify(args.ready_fd, f"ERROR: {error}")
         else:
-            print(f"mascota: {error}", file=sys.stderr)
+            print(f"miga: {error}", file=sys.stderr)
         return 1
 
 

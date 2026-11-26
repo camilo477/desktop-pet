@@ -72,8 +72,9 @@ cd desktop-pet
 ```
 
 The installer creates `.venv` in this directory and a launcher in
-`~/.local/bin/mascota`. It needs no administrator privileges and can be run
-again. Keep the project directory in place. Installation may download packages;
+`~/.local/bin/miga`. It needs no administrator privileges and can be run
+again. On upgrade, it removes the old `mascota` link if it points to this
+checkout. Existing preferences and running instances carry over. Keep the project directory in place. Installation may download packages;
 the application then runs entirely offline.
 
 If `~/.local/bin` is missing from your PATH, add this line once to your shell
@@ -88,8 +89,8 @@ The installer does not change your shell configuration or set up automatic start
 ## Usage
 
 ```sh
-mascota       # Start in the background; the terminal can be closed.
-mascota off   # Save preferences and close only this application.
+miga       # Start in the background; the terminal can be closed.
+miga off   # Save preferences and close only this application.
 ```
 
 The command works from any directory. Repeated starts reuse the existing
