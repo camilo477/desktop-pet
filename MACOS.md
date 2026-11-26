@@ -55,6 +55,10 @@ En un Mac compatible puedes copiar el paquete completo a tu carpeta Aplicaciones
 
 El identificador estable del paquete es `io.github.camilo477.miga`. Estas compilaciones de desarrollo llevan firma **ad hoc**. La distribución con Developer ID y la notarización están pendientes. Gatekeeper puede rechazar una copia descargada y macOS puede volver a pedir permiso tras una actualización. Para probar el proyecto en ese caso, compílalo localmente desde el código de confianza.
 
+## Fluidez del panel
+
+Mientras el panel está visible y Miga está despierto, AppKit marca los fotogramas con el reloj de la pantalla a una frecuencia preferida de 30 FPS. Al quedar oculto o dormirse, Miga usa el temporizador de Qt. La pausa detiene ambos. Al mover el panel entre pantallas, macOS gestiona la asociación del reloj con la ventana. [Reloj de pantalla de NSWindow](https://developer.apple.com/documentation/appkit/nswindow/displaylink(target:selector:))
+
 ## Validación pendiente en un Mac de uso diario
 
 En los runners ARM64 e Intel se abrió el paquete con LaunchServices, se comprobó la instancia única y se verificaron el panel sin foco y los destinos de clic de una zona visible y una transparente. Con el permiso ya disponible, una pulsación sintética llegó al observador de Quartz y a la ventana de prueba en primer plano. La denegación y la revocación se comprobaron simulando la respuesta de la consulta de permiso.

@@ -325,3 +325,24 @@ Each represented key lights on the first available frame. The paws follow the
 current targets. Fast typing can redirect a paw before it lands, and with one
 paw reserved for the mouse a distant key may exceed the other paw's reach.
 A contact reaction occurs only when the paw reaches the key.
+
+## Performance and verification
+
+At 300 logical pixels, repeated synthetic typing in an isolated X11 session
+averaged 6.4% of one CPU core with the original coat, 7.7% with the orange tabby
+and 8.4% with the calico. The widget painted about 29.4 frames per second.
+Seated sleep averaged 1.9% and 10 FPS. Pausing stopped periodic frames and
+released the input listeners. Resident memory in these runs was approximately
+102 MiB. The same workload on the preceding revision averaged 7.5%, 9.1% and
+10.3% respectively during typing. Hardware, Qt, desktop services and scaling
+affect these measurements.
+
+On macOS the visible, awake panel uses an AppKit display link at a preferred
+30 FPS. In paired macOS 15 runner samples, visible widget paints during typing
+increased from 10.6 to 29.9 per second on Apple Silicon and from 24.9 to 30.0
+on Intel. The higher frame rate used more CPU in both samples. Qt schedules
+sleeping or occluded windows. The macOS workflow can
+compare two revisions on the same runner by setting its optional
+`comparison` input. It reports timer delivery, generated frames and widget
+paints separately. Physical display latency requires a desktop measurement.
+[Native macOS checks](https://github.com/camilo477/desktop-pet/actions/workflows/macos.yml)

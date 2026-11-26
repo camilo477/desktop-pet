@@ -124,5 +124,5 @@ GNOME measured 6.27% of one CPU core at 29.4 FPS during external activity,
 29.3 FPS, sleep 2.21% at 10 FPS and pause 0.11% at zero FPS, around 82 MiB
 resident. The active workloads differ because Wayland receives general activity.
 
-The separate Phase 7 performance follow-up is macOS typing throughput observed
-in Phase 6B, 11.9 FPS on ARM64 and 23.1 FPS on Intel.
+Current X11 and macOS frame measurements are described in the
+[performance notes](README.md#performance-and-verification).
