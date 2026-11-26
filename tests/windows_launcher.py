@@ -15,9 +15,22 @@ from PySide6.QtCore import QCoreApplication
 from windows_runtime import endpoint, instance_busy, request, runtime_directory
 
 
+def wait_for_instance(directory):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        name = endpoint(directory)
+        if name and instance_busy(directory) and request(name, b'ping'):
+            return
+        time.sleep(.05)
+    raise AssertionError('Test instance never became ready')
+
+
 def main():
     app = QCoreApplication([])
     directory = runtime_directory()
+    if sys.argv[1:] == ['--wait-ready']:
+        wait_for_instance(directory)
+        return
     assert not instance_busy(directory), 'Use a disposable session without Miga running'
     if not sys.argv[1:]:
         # Interrupt only this test's own child. A new owner must be able to
@@ -28,14 +41,7 @@ def main():
         child = subprocess.Popen([str(Path(sys.base_prefix) / 'python.exe'),
                                   str(ROOT / 'main.py'), '--run'], env=env)
         try:
-            deadline = time.monotonic() + 12
-            while time.monotonic() < deadline:
-                name = endpoint(directory)
-                if name and instance_busy(directory) and request(name, b'ping'):
-                    break
-                time.sleep(.05)
-            else:
-                raise AssertionError('Test instance never became ready')
+            wait_for_instance(directory)
         finally:
             if child.poll() is None:
                 child.terminate()

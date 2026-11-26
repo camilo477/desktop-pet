@@ -39,7 +39,7 @@ jobs:
           Remove-Item Env:QT_SCALE_FACTOR
           $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Miga Desktop Pet.lnk'
           Start-Process -FilePath $shortcut
-          & $python -c "import time; from windows_runtime import runtime_directory,instance_busy; d=runtime_directory(); end=time.monotonic()+15; exec('while not instance_busy(d) and time.monotonic()<end: time.sleep(.1)'); assert instance_busy(d)"
+          & $python tests/windows_launcher.py --wait-ready
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           miga
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
