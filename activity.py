@@ -219,6 +219,10 @@ class ActivityMonitor:
             self._activity = replace(self._activity, mouse=time.monotonic())
             self._notify()
 
+    def reset_pointer_origin(self):
+        with self._lock:
+            self._global_position = None
+
     def set_dragging(self, dragging):
         # Keep each listener's last coordinate current while the window moves.
         # The next genuine movement then starts at the release position.

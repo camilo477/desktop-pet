@@ -53,6 +53,7 @@ class PetWindow(QWidget):
         platform = QApplication.platformName().lower()
         self.mask_supported = platform == "xcb" or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
+        self.windows_input = None
         self.global_input = supports_global_input(platform)
         self.layout_mode = self.preference('layout_mode', ('auto', 'manual'), 'auto')
         self.manual_layout = self.preference('layout', DISTRIBUTIONS, 'us')
@@ -74,7 +75,8 @@ class PetWindow(QWidget):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.always_on_top)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus)
+        if platform == "xcb":
+            self.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -121,6 +123,9 @@ class PetWindow(QWidget):
         app.screenRemoved.connect(lambda screen: QTimer.singleShot(0, self.ensure_visible))
         for screen in app.screens():
             self.watch_screen(screen)
+        if self.global_input and platform == 'windows':
+            from windows_input import WindowsInput
+            self.windows_input = WindowsInput(self.activity)
         self.render_frame()
         self.refresh_activity()
 
@@ -138,6 +143,8 @@ class PetWindow(QWidget):
 
     def refresh_activity(self) -> None:
         self.activity.set_enabled(self.reactions and not self.paused)
+        if self.windows_input:
+            self.windows_input.configure(int(self.winId()) if self.activity.enabled else None)
         if not self.reactions or self.paused:
             self.animations.clear_input()
             self.render_frame()
@@ -149,6 +156,8 @@ class PetWindow(QWidget):
 
     def tick(self) -> None:
         now = time.monotonic()
+        if self.windows_input:
+            self.windows_input.poll(now)
         if self._menu is not None and self.animations.sleeping and self.menu_has_pointer():
             self.activity.discard_menu_pointer()
         context_target = self.cursor_on_pet if self.animations.sleeping else None
@@ -262,6 +271,14 @@ class PetWindow(QWidget):
         if event.type() == QEvent.Type.DevicePixelRatioChange and hasattr(self, "frame"):
             self.render_frame(force_mask=True)
         return super().event(event)
+
+    def nativeEvent(self, event_type, message):
+        backend = getattr(self, 'windows_input', None)
+        if backend:
+            handled, result = backend.message(message)
+            if handled:
+                return True, result
+        return super().nativeEvent(event_type, message)
 
     def mousePressEvent(self, event) -> None:
         if self.system_drag:
@@ -396,6 +413,8 @@ class PetWindow(QWidget):
         self.always_on_top = checked
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
         self.show()
+        if self.windows_input and self.activity.enabled:
+            self.windows_input.configure(int(self.winId()))
         self.ensure_visible()
         self.render_frame(force_mask=True)
         self.save_preferences()
@@ -567,6 +586,8 @@ class PetWindow(QWidget):
         self._closed = True
         self.timer.stop()
         self.position_timer.stop()
+        if self.windows_input:
+            self.windows_input.configure(None)
         self.activity.stop()
         self.save_preferences()
         if self._menu is not None:
