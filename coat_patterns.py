@@ -6,7 +6,7 @@ import math
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainterPath, QRadialGradient, QTransform
 from PySide6.QtCore import Qt
 
-from anatomy import FACE_RX, FACE_RY, FACE_DEPTH, face_depth
+from anatomy import FACE_RX, FACE_RY, FACE_DEPTH, BodyGeometry, face_depth
 
 
 def smooth_loop(points):
@@ -190,7 +190,7 @@ class Markings:
             self.point_brush = QBrush(gradient)
             self.point_color = colors['ink']
         self.face = [(colors[c], FacePatch(points)) for c, points in pattern.face]
-        self.body = [(colors[c], smooth_loop(points)) for c, points in pattern.body]
+        self.body = [(colors[c], BodyGeometry.bind(smooth_loop(points))) for c, points in pattern.body]
         self.legs = [[(colors[c], start, stop) for c, start, stop in bands] for bands in pattern.legs]
         self.tail = [(colors[c], tail_weights(start, stop)) for c, start, stop in pattern.tail]
 
@@ -219,7 +219,7 @@ class Markings:
         p.save()
         p.setOpacity(p.opacity() * 0.94)
         for color, controls in self.body:
-            p.fillPath(cubic_path([body.map(*pt) for pt in controls]), color)
+            p.fillPath(cubic_path(body.deform(controls)), color)
         p.restore()
 
     def draw_tail(self, p, outline, warped):

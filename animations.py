@@ -669,7 +669,6 @@ class Animations:
         pose.ear_left += ear_flex
         pose.ear_right += ear_flex
         body = BodyGeometry(pose)
-        face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
             rest = self.keyboard.rest[index]
             side = -1 if index == 0 else 1
@@ -686,9 +685,9 @@ class Animations:
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
                 paw.ready_until = now + .6
             elif playing and self.action_kind in ('lick', 'wash') and index == 0:
-                paw.aim('groom', face.grooming_target(self.action_kind, phase))
+                paw.aim('groom', FaceGeometry(pose, body).grooming_target(self.action_kind, phase))
             elif playing and motion.rub and side == pose.action_side:
-                x, y = face.ear_grooming_target(side, motion.stroke)
+                x, y = FaceGeometry(pose, body).ear_grooming_target(side, motion.stroke)
                 paw.aim('ear_rub', (mix(rest[0], x, motion.rub), mix(rest[1], y + 3.5, motion.rub)))
             elif playing and offset is not None:
                 paw.aim(self.action_kind, (rest[0] + offset[0], rest[1] + offset[1]))

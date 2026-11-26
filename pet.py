@@ -5,7 +5,7 @@ import math
 import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPixmap, QRegion
+from PySide6.QtGui import QActionGroup, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from keyboard_distributions import DISTRIBUTIONS
@@ -129,7 +129,7 @@ class PetWindow(QWidget):
                 self.move(self.clamp_position(position))
         app = QApplication.instance()
         app.screenAdded.connect(self.watch_screen)
-        app.screenRemoved.connect(lambda screen: QTimer.singleShot(0, self.ensure_visible))
+        app.screenRemoved.connect(self.screen_removed)
         for screen in app.screens():
             self.watch_screen(screen)
         if self.native_wayland:
@@ -165,9 +165,12 @@ class PetWindow(QWidget):
         if not self.native_wayland and not self._closed and not self.dragging:
             self.move(self.clamp_position(self.pos()))
 
+    def screen_removed(self, screen) -> None:
+        QTimer.singleShot(0, self, self.ensure_visible)
+
     def watch_screen(self, screen) -> None:
         screen.availableGeometryChanged.connect(self.ensure_visible)
-        QTimer.singleShot(0, self.ensure_visible)
+        QTimer.singleShot(0, self, self.ensure_visible)
 
     def refresh_activity(self) -> None:
         self.activity.set_enabled(self.reactions and not self.paused)
@@ -239,10 +242,9 @@ class PetWindow(QWidget):
     def input_arrived(self) -> None:
         if self._closed or self.paused or not self.reactions:
             return
-        if time.monotonic() - self.last_frame >= 1 / 30:
+        if self.timer.interval() > 34 or time.monotonic() - self.last_frame >= 1 / 30:
+            # Wake on the input notification, even just after a sleeping frame.
             self.tick()
-            self.timer.start(34)
-        elif self.timer.interval() > 34:
             self.timer.start(34)
 
     def render_frame(self, force_mask: bool = False) -> None:
@@ -280,9 +282,9 @@ class PetWindow(QWidget):
                      round(pose.groom * 20), round(pose.yawn * 20))
         if handle and (force_mask or signature != self.mask_signature or pose.zzz > .01 or now - self.mask_time >= 0.1):
             # Native masks use logical pixels; keep antialiased edges inside the mask.
-            image = self.frame.toImage().scaled(self.size())
-            image.setDevicePixelRatio(1)
-            base = QRegion(QBitmap.fromImage(image.createMaskFromColor(0, Qt.MaskMode.MaskInColor)))
+            mask = self.frame.scaled(self.size()).mask()
+            mask.setDevicePixelRatio(1)
+            base = QRegion(mask)
             region = base
             for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                 region = region.united(base.translated(dx, dy))

@@ -9,9 +9,18 @@ def start_listeners(monitor):
     from pynput import keyboard, mouse
     from x11_keyboard import XkbKeyboard
 
+    class StoppableRecord:
+        def _stop_platform(self):
+            # EnableContext occupies the RECORD connection until EndOfData.
+            # Send DisableContext on its independent control connection, even
+            # on a quiet desktop where no further input will wake the listener.
+            if hasattr(self, '_context'):
+                self._display_stop.record_disable_context(self._context)
+                self._display_stop.flush()
+
     # This small adapter uses the pinned X11 backend's raw hook. It avoids
     # translating physical input into text, including under Shift or Caps Lock.
-    class PhysicalKeyboard(keyboard.Listener):
+    class PhysicalKeyboard(StoppableRecord, keyboard.Listener):
         def _initialize(self, display):
             if not self.running:
                 raise self.StopException()
@@ -51,23 +60,15 @@ def start_listeners(monitor):
             elif kind == 3:
                 monitor.key_up(code, stamp, self)
 
-        def _stop_platform(self):
-            if hasattr(self, '_context'):
-                super()._stop_platform()
-
-    class PointerListener(mouse.Listener):
+    class PointerListener(StoppableRecord, mouse.Listener):
         def _initialize(self, display):
-            if not self.running:
+            if not self.running or self not in monitor._listeners:
                 raise self.StopException()
             super()._initialize(display)
             pointer = display.screen().root.query_pointer()
             with monitor._lock:
                 if self.running:
                     monitor._global_position = (pointer.root_x, pointer.root_y)
-
-        def _stop_platform(self):
-            if hasattr(self, '_context'):
-                super()._stop_platform()
 
     monitor._keyboard_listener = PhysicalKeyboard(suppress=False)
     monitor._listeners = [monitor._keyboard_listener,

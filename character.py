@@ -6,17 +6,28 @@ import re
 import xml.etree.ElementTree as ET
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRegion, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
 from appearance import Appearance, COATS, EYES, NOSES
 from coat_patterns import Markings, cubic_path as curve
 from animations import Pose, mix, smoothstep
-from anatomy import BodyGeometry, FaceGeometry
+from anatomy import BodyGeometry, FaceGeometry, face_depth
 from keyboard_layout import Keyboard, KEYBOARD_SCALE, KEY_TRAVEL
 from personality import DROWSY
 
 BODY_TONES = ('neck-shade', 'chest-volume', 'hip-left', 'hip-right')
+
+# Sample the same cubic limb and taper at the same 15 material coordinates.
+def arm_samples():
+    for i in range(15):
+        t = i / 14
+        u = 1 - t
+        radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * .6
+        yield t, u, u * u, u * t, t * t, radius
+
+
+ARM_SAMPLES = tuple(arm_samples())
 
 
 def polygon(points):
@@ -54,6 +65,13 @@ class CatArt:
             if node.tag.endswith('g'):
                 node = next(iter(node))
             self.shapes[name] = cubic_points(node)
+        self.body_controls = {name: BodyGeometry.bind(self.shapes[name])
+                              for name in ('body', *BODY_TONES)}
+        self.face_volume = [(x - 101, y - 77, face_depth(x - 101, y - 77))
+                            for x, y in self.shapes['face-volume']]
+        tail_count = len(self.shapes['tail'])
+        self.tail_weights = tuple(math.sin(math.pi * i / (tail_count - 1)) ** 2
+                                  for i in range(tail_count))
         self.hits = []
         self.head_hit_paths = []
         self.paw_path = curve(cubic_points(elements['paw'][0]))
@@ -65,6 +83,7 @@ class CatArt:
         self.head_position = QPointF(103, 76.5)
         self.layers = {}
         self.cache_scale = 0.0
+        self.pixel_aligned = True
         self.keyboard = QPixmap()
         self.sleep_face = None
         self.set_keyboard(keyboard or Keyboard())
@@ -125,11 +144,15 @@ class CatArt:
         self.keyboard_cache = None
 
     def cache(self, size, pixel_ratio):
-        scale = math.ceil(size * pixel_ratio) / 200
-        if self.keyboard_cache != (scale, self.model.layout):
+        extent = size * pixel_ratio
+        scale = math.ceil(extent) / 200
+        aligned = extent == round(extent)
+        resized = scale != self.cache_scale or aligned != self.pixel_aligned
+        self.pixel_aligned = aligned
+        keyboard_cache = (scale, aligned, self.model.layout)
+        if self.keyboard_cache != keyboard_cache:
             self._cache_keyboard(scale)
-            self.keyboard_cache = (scale, self.model.layout)
-        resized = scale != self.cache_scale
+            self.keyboard_cache = keyboard_cache
         if resized:
             self.cache_scale = scale
             self._cache_layer('mouse', scale)
@@ -144,15 +167,25 @@ class CatArt:
                 self._cache_layer('paw', scale, toes[1:], 'paw-right')
             self._cache_layer('hind-feet', scale, feet)
             self.coat_layers_dirty = False
-        if not resized and self.sleep_face is not None:
-            return
-        self.sleep_face = None
+        if resized:
+            self.sleep_face = None
+
+    def _cache_sleep_face(self):
+        scale = self.cache_scale
         image = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
         image.fill(Qt.GlobalColor.transparent)
         p = QPainter(image); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
         resting = Pose(sleep=1, relax=1, blink=1, expression=DROWSY)
-        self._head(p, resting, BodyGeometry(resting)); p.end(); image.setDevicePixelRatio(scale)
-        self.sleep_face = image, self.head_position, self.head_hit_paths[:]
+        face = FaceGeometry(resting)
+        self._draw_face(p, resting, face)
+        p.end()
+        origin = QPointF()
+        if self.pixel_aligned:
+            bounds = QRegion(image.mask()).boundingRect().adjusted(-2, -2, 2, 2).intersected(image.rect())
+            image = image.copy(bounds)
+            origin = QPointF(bounds.topLeft()) / scale
+        image.setDevicePixelRatio(scale)
+        self.sleep_face = image, origin, QPointF(face.cx, face.cy), self.head_hit_paths[:]
 
     def _cache_layer(self, name, scale, colors=(), target=None):
         bounds = self.renderer.boundsOnElement(name)
@@ -203,7 +236,15 @@ class CatArt:
                     transform.translate(-box.center().x(), -box.center().y())
                     self.legends[key.identifier] = transform.map(glyph)
             self.draw_key(p, key, False)
-        p.end(); self.keyboard.setDevicePixelRatio(scale)
+        p.end()
+        # At fractional physical extents preserve Qt's full-image sampling origin.
+        self.keyboard_origin = QPointF()
+        if self.pixel_aligned:
+            bounds = QTransform.fromScale(scale, scale).mapRect(self.board_path.boundingRect())
+            pixels = bounds.toAlignedRect().adjusted(-2, -2, 2, 2).intersected(self.keyboard.rect())
+            self.keyboard = self.keyboard.copy(pixels)
+            self.keyboard_origin = QPointF(pixels.topLeft()) / scale
+        self.keyboard.setDevicePixelRatio(scale)
 
     def draw_key(self, p, key, down, pressure=0.0):
         p.save(); p.translate(0, (KEY_TRAVEL if down else 0) + pressure * .45 * KEYBOARD_SCALE)
@@ -219,12 +260,12 @@ class CatArt:
 
     def _body(self, p, body):
         p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
-        outline = curve([body.map(x, y) for x, y in self.shapes['body']])
+        outline = curve(body.deform(self.body_controls['body']))
         self.hits.append(('torso', outline))
         p.drawPath(outline)
         p.save(); p.setClipPath(outline, Qt.ClipOperation.IntersectClip)
         for name, color in self.body_tones.items():
-            p.setBrush(color); p.drawPath(curve([body.map(x, y) for x, y in self.shapes[name]]))
+            p.setBrush(color); p.drawPath(curve(body.deform(self.body_controls[name])))
         if self.markings:
             self.markings.draw_body(p, body)
         if self.fur_edge:
@@ -241,7 +282,7 @@ class CatArt:
             if pose.motion.curl:
                 x = mix(x, curled[i][0], pose.motion.curl)
                 y = mix(y, curled[i][1], pose.motion.curl)
-            weight = math.sin(math.pi * i / (len(points) - 1)) ** 2
+            weight = self.tail_weights[i]
             x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
             y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
             y += (pose.tail_tip + pose.motion.tip) * weight * weight
@@ -289,16 +330,14 @@ class CatArt:
             bx = mix(bx, sx + dx * .70 + nx * bend * .55, reach)
             by = mix(by, sy + dy * .70 + ny * bend * .55, reach)
         left, right = [], []
-        for i in range(15):
-            t = i / 14; u = 1 - t
-            uu, ut, tt = u * u, u * t, t * t
+        for t, u, uu, ut, tt, base_radius in ARM_SAMPLES:
             x = uu * u * sx + 3 * ut * (u * ax + t * bx) + tt * t * wx
             y = uu * u * sy + 3 * ut * (u * ay + t * by) + tt * t * wy
             tx = uu * (ax - sx) + 2 * ut * (bx - ax) + tt * (wx - bx)
             ty = uu * (ay - sy) + 2 * ut * (by - ay) + tt * (wy - by)
             length = max(.001, math.hypot(tx, ty))
             tx, ty = tx / length, ty / length
-            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * .6 + reach * u * u
+            radius = base_radius + reach * u * u
             left.append((x - ty * radius, y + tx * radius))
             right.append((x + ty * radius, y - tx * radius))
         cap = [(wx + (tx * math.sin(a) - ty * math.cos(a)) * 3,
@@ -329,13 +368,18 @@ class CatArt:
     def _head(self, p, pose, body):
         face = FaceGeometry(pose, body)
         self.head_position = QPointF(face.cx, face.cy)
-        if pose.sleep == 1 and pose.blink == 1 and self.sleep_face is not None:
-            image, origin, paths = self.sleep_face
-            offset = self.head_position - origin
+        if pose.sleep == 1 and pose.blink == 1:
+            if self.sleep_face is None:
+                self._cache_sleep_face()
+            image, origin, anchor, paths = self.sleep_face
+            offset = self.head_position - anchor
             transform = QTransform.fromTranslate(offset.x(), offset.y())
-            p.drawPixmap(offset, image)
+            p.drawPixmap(offset + origin, image)
             self.head_hit_paths = [transform.map(path) for path in paths]
-            return
+        else:
+            self._draw_face(p, pose, face)
+
+    def _draw_face(self, p, pose, face):
         self.head_hit_paths = []
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.head_fur)
         for side, name in ((-1, 'ear-left'), (1, 'ear-right')):
@@ -353,7 +397,7 @@ class CatArt:
                     pose.groom * (.65 if pose.action == 'wash' else .2))
         p.save(); p.setClipPath(shape, Qt.ClipOperation.IntersectClip)
         p.setBrush(self.face_tone)
-        p.drawPath(curve([face.point(x - 101, y - 77) for x, y in self.shapes['face-volume']]))
+        p.drawPath(curve([face.point(*point) for point in self.face_volume]))
         if self.markings:
             self.markings.draw_face(p, face, shape)
         if self.fur_edge:
@@ -453,7 +497,7 @@ class CatArt:
         self.layer(p, 'hind-feet'); p.restore()
         self.hits.append(('paw', self.feet_path.translated(0, -pose.lift)))
         self._body(p, body)
-        p.drawPixmap(0, 0, self.keyboard)
+        p.drawPixmap(self.keyboard_origin, self.keyboard)
         self.hits.append(('keyboard', self.board_path))
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():

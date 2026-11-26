@@ -31,6 +31,18 @@ class BodyGeometry:
         return (104 + (x - 104) * (1 + (self.breadth - 1) * weight) + self.x * weight,
                 y + drop * weight - self.lift)
 
+    @staticmethod
+    def bind(points):
+        """Bind fixed SVG controls to the same floor and shoulder weights as map()."""
+        return tuple((x - 104, y, max(0., min(1.05, (153 - y) / 62)),
+                      max(-1., min(1., (x - 104) / 18))) for x, y in points)
+
+    def deform(self, controls):
+        breadth = self.breadth - 1
+        return [(104 + x * (1 + breadth * w) + self.x * w,
+                 y + (self.y + self.shoulder_roll * roll) * w - self.lift)
+                for x, y, w, roll in controls]
+
     @property
     def hips(self):
         return self.map(104, 153)

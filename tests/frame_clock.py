@@ -102,6 +102,40 @@ def sample(window, mode):
         window.show()
 
 
+def sample_display_link(window):
+    """Probe a window-paced clock before considering any native scheduling change."""
+    import AppKit
+    import objc
+    from Foundation import NSObject, NSRunLoop, NSRunLoopCommonModes
+
+    class FrameTarget(NSObject):
+        @objc.typedSelector(b'v@:@')
+        def frame_(self, link):
+            window.tick()
+
+    panel = objc.objc_object(c_void_p=int(window.winId())).window()
+    target = FrameTarget.alloc().init()
+    link = panel.displayLinkWithTarget_selector_(target, b'frame:')
+    if link is None:
+        print('No display link for the test window.', flush=True)
+        return
+    window.timer.stop()
+    link.setPreferredFramesPerSecond_(30)
+    link.addToRunLoop_forMode_(NSRunLoop.mainRunLoop(), NSRunLoopCommonModes)
+    frames, paints = window.frames, window.paints
+    start, cpu = time.perf_counter(), time.process_time()
+    try:
+        wait(8000)
+    finally:
+        link.invalidate()
+    elapsed = time.perf_counter() - start
+    print(json.dumps(dict(mode='display-link', frame_hz=round((window.frames-frames)/elapsed, 2),
+                          paint_hz=round((window.paints-paints)/elapsed, 2),
+                          cpu=round(100*(time.process_time()-cpu)/elapsed, 2),
+                          visible=bool(panel.occlusionState() & AppKit.NSWindowOcclusionStateVisible))),
+          flush=True)
+
+
 if __name__ == '__main__':
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
@@ -120,4 +154,6 @@ if __name__ == '__main__':
             modes.append('tap-off')
         for mode in modes:
             sample(window, mode)
+        if window.mac_input:
+            sample_display_link(window)
         window.shutdown()

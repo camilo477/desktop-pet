@@ -1,12 +1,15 @@
 """Essential checks: run with .venv/bin/python tests/smoke.py."""
 
 import fcntl
+import gc
 from dataclasses import replace
 import math
 import os
 from pathlib import Path
 import random
 import sys
+import time
+import weakref
 from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -96,6 +99,30 @@ def check_window() -> None:
     pet.close()
     restored.close()
     QCursor.setPos(cursor)
+
+
+def check_window_lifecycle():
+    pet = PetWindow()
+    pet.set_reactions(True)
+    now = time.monotonic()
+    pet.animations.advance(.034, now - 11)
+    pet.animations.last_activity = now - 220
+    for i in range(100):
+        pet.animations.advance(.1, now - 10 + i / 10)
+    assert pet.animations.sleeping
+    pet.timer.start(100)
+    pet.last_frame = time.monotonic()
+    pet.activity.key_down('A')
+    # Deliver just the queued notice, before either the old or new timer is due.
+    QApplication.processEvents()
+    assert pet.animations.pose.pressed == {'A'} and pet.timer.interval() == 34
+    assert any(paw.goal == 'A' for paw in pet.animations.paws)
+    pet.shutdown()
+    ref = weakref.ref(pet)
+    del pet
+    QApplication.processEvents()
+    gc.collect()
+    assert ref() is None, 'The application must release a closed window and its graphics'
 
 
 def check_motion_and_screens() -> None:
@@ -539,6 +566,7 @@ if __name__ == "__main__":
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, directory)
         app = QApplication([])
         check_window()
+        check_window_lifecycle()
         check_motion_and_screens()
         check_responsiveness()
         check_personality()
