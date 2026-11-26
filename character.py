@@ -34,17 +34,13 @@ def polygon(points):
     return path
 
 
-def unit(x, y):
-    length = max(.001, math.hypot(x, y))
-    return x / length, y / length
-
-
 class CatArt:
     def __init__(self):
         path = Path(__file__).resolve().parent / 'assets' / 'cat' / 'miga.svg'
         self.renderer = QSvgRenderer(str(path))
         if not self.renderer.isValid():
             raise RuntimeError('Could not load the character artwork.')
+        self.wheel_center = self.renderer.boundsOnElement('mouse-wheel').center()
         elements = {node.get('id'): node for node in ET.parse(path).iter() if node.get('id')}
         self.shapes = {}
         names = ('body', 'body-sleep', 'head-shape', 'head-sleep', 'tail', 'tail-sleep',
@@ -206,15 +202,31 @@ class CatArt:
         bend = max(4, 12 - distance * .09)
         cx = (sx + wx) * .5 + side * bend
         cy = (sy + wy) * .5 + min(9, abs(dx) * .12)
+        reach = body.mouse_reach if side < 0 else 0
+        # These cubic handles reproduce the usual quadratic exactly at rest.
+        ax, ay = mix(sx, cx, 2 / 3), mix(sy, cy, 2 / 3)
+        bx, by = mix(wx, cx, 2 / 3), mix(wy, cy, 2 / 3)
+        if reach:
+            # The elbow folds below the chest. At full extension the wrist
+            # still approaches the top of the shell almost parallel to the floor.
+            fold = 1 - smoothstep((distance - 30) / 40)
+            ax = mix(ax, sx + dx * .12 + 3 + 7 * fold, reach)
+            ay = mix(ay, sy + dy * .62 + 7, reach)
+            bx = mix(bx, wx - dx * .38, reach)
+            by = mix(by, wy - dy * .04 + 3 * fold, reach)
         left, right = [], []
         for i in range(15):
             t = i / 14; u = 1 - t
-            x, y = u * u * sx + 2 * u * t * cx + t * t * wx, u * u * sy + 2 * u * t * cy + t * t * wy
-            tx, ty = unit(u * (cx - sx) + t * (wx - cx), u * (cy - sy) + t * (wy - cy))
-            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * .6
+            uu, ut, tt = u * u, u * t, t * t
+            x = uu * u * sx + 3 * ut * (u * ax + t * bx) + tt * t * wx
+            y = uu * u * sy + 3 * ut * (u * ay + t * by) + tt * t * wy
+            tx = uu * (ax - sx) + 2 * ut * (bx - ax) + tt * (wx - bx)
+            ty = uu * (ay - sy) + 2 * ut * (by - ay) + tt * (wy - by)
+            length = max(.001, math.hypot(tx, ty))
+            tx, ty = tx / length, ty / length
+            radius = 3.0 + 4.5 * u ** .8 + math.sin(math.pi * t) ** 2 * (.6 + reach * u)
             left.append((x - ty * radius, y + tx * radius))
             right.append((x + ty * radius, y - tx * radius))
-        tx, ty = unit(wx - cx, wy - cy)
         cap = [(wx + (tx * math.sin(a) - ty * math.cos(a)) * 3,
                 wy + (ty * math.sin(a) + tx * math.cos(a)) * 3)
                for a in (math.pi / 4, math.pi / 2, math.pi * .75)]
@@ -348,12 +360,13 @@ class CatArt:
         for identifier in pose.pressed | pressures.keys():
             key = self.keys[identifier]
             self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
-        p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse'); p.restore()
+        p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
         if pose.scroll > .01:
-            p.setPen(QPen(QColor('#586970'), 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            x, y = 21 + pose.mouse_dx, 162 + pose.mouse_dy
+            p.translate(self.wheel_center); p.rotate(-14)
+            p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
-            p.drawLine(QPointF(x - 1, y + 3 + step), QPointF(x, y + 5 + step))
+            p.drawLine(QPointF(step, -.6), QPointF(step, .6))
+        p.restore()
         washing_face = pose.action == 'wash' and pose.groom > .01
         if pose.sleep < .995:
             if not washing_face:
@@ -364,9 +377,10 @@ class CatArt:
             self._arm(p, pose, -1, body)
         for side in (-1, 1):
             x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
-            p.save(); p.translate(x, y); p.rotate(pose.mouse * 12 if side < 0 else 0)
+            reach = body.mouse_reach if side < 0 else 0
+            p.save(); p.translate(x, y); p.rotate(-14 * reach)
             pressure = pose.left_pressure if side < 0 else pose.right_pressure
             p.scale(1 + pressure * .035, 1 - pressure * .10)
-            p.translate(0, -3.5)
+            p.translate(-reach, mix(-3.5, 0, reach))
             self.layer(p, 'paw'); p.restore()
         self._zzz(p, pose); p.restore()

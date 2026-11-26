@@ -268,11 +268,11 @@ def check_responsiveness() -> None:
 def check_geometry_and_contacts() -> None:
     art = CatArt(); art.cache(200, 1)
 
-    def mouse_centroid(pose):
+    def mouse_centroid(pose, fill='#a9b4b6'):
         image = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(image); art.draw(painter, pose); painter.end()
-        color = QColor('#a9b4b6').rgba()
+        color = QColor(fill).rgba()
         points = [(x, y) for y in range(140, 185) for x in range(45) if image.pixel(x, y) == color]
         assert points
         return tuple(sum(p[i] for p in points) / len(points) for i in (0, 1))
@@ -287,6 +287,9 @@ def check_geometry_and_contacts() -> None:
                 assert math.dist((pose.left_x, pose.left_y), (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy)) < .01
         # Test the final painted object, including the SVG and painter transforms.
         moved = mouse_centroid(Pose(mouse_dx=pose.mouse_dx, mouse_dy=pose.mouse_dy))
+        assert animation.mouse_contact
+        wheel_x, _ = mouse_centroid(pose, '#59696e')
+        assert wheel_x < moved[0] and wheel_x < pose.left_x  # Visible ahead of the planted paw.
         for i, direction in enumerate((-dx, -dy)):
             if direction:
                 assert (moved[i] - origin[i]) * direction > 4

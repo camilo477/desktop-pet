@@ -21,6 +21,7 @@ class BodyGeometry:
         self.y = (pose.balance_y + pose.relax * 1.2 - pose.breath * .55
                   + pose.pet * 1.1 + pose.contact * 1.25)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
+        self.mouse_reach = pose.mouse * (1 - self.sleep)
 
     def map(self, x, y):
         # Zero deformation at the floor: the haunches do not slide with the chest.
@@ -49,8 +50,9 @@ class BodyGeometry:
         return self.map(139, 145)
 
     def shoulder(self, side):
-        return self.map(mix(87 if side < 0 else 119, 90 if side < 0 else 119, self.sleep),
-                        mix(115, 139, self.sleep))
+        slide = self.mouse_reach if side < 0 else 0
+        return self.map(mix(87 if side < 0 else 119, 90 if side < 0 else 119, self.sleep) - 4 * slide,
+                        mix(115, 139, self.sleep) + 4 * slide)
 
     def reachable(self, side, point):
         sx, sy = self.shoulder(side)

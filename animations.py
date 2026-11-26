@@ -10,7 +10,7 @@ from anatomy import BodyGeometry, FaceGeometry
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
-MOUSE_REST = (21.0, 162.0)
+MOUSE_REST = (25.0, 161.0)  # Paw contact on the palm end of the shell.
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
