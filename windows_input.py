@@ -4,6 +4,7 @@ import ctypes as C
 from ctypes import wintypes as W
 import winreg
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCursor, QGuiApplication
 
 from windows_keyboard import LAYOUT_IDS, SIDED_VK, foreign_layout, physical_key
@@ -77,6 +78,7 @@ class WindowsInput:
         self.active = False
         self.locked = self.suspended = False
         self.held = {}
+        self.move_pending = False
         self.screen = None
         self.layout_ids = special_layouts()
         self.next_register = self.next_layout = self.next_reconcile = 0.0
@@ -106,11 +108,13 @@ class WindowsInput:
 
     def reset(self):
         self.held.clear()
+        self.move_pending = False
         self.screen = None
         self.next_register = self.next_layout = self.next_reconcile = 0.0
         self.monitor.clear_input()
 
     def sync_cursor(self):
+        self.move_pending = False
         point = QCursor.pos()
         self.screen = QGuiApplication.screenAt(point)
         self.monitor.reset_pointer_origin()
@@ -159,16 +163,23 @@ class WindowsInput:
             if name == 'Pause':  # Some keyboards never send a break for Pause.
                 self.release(code)
 
+    def sample_motion(self):
+        if not self.move_pending:
+            return
+        self.move_pending = False
+        point = QCursor.pos()
+        screen = QGuiApplication.screenAt(point)
+        if screen != self.screen:
+            self.monitor.reset_pointer_origin()
+            self.screen = screen
+        self.monitor.pointer_moved(point.x(), point.y())
+
     def mouse(self, mouse):
-        if mouse.x or mouse.y or mouse.flags & 1:
-            # Desktop cursor movement includes Windows acceleration. Qt supplies
-            # logical coordinates, including on absolute pointing devices.
-            point = QCursor.pos()
-            screen = QGuiApplication.screenAt(point)
-            if screen != self.screen:
-                self.monitor.reset_pointer_origin()
-                self.screen = screen
-            self.monitor.pointer_moved(point.x(), point.y())
+        if (mouse.x or mouse.y or mouse.flags & 1) and not self.move_pending:
+            # Read the accelerated desktop position after native dispatch. One
+            # pending sample coalesces high-rate reports in Qt logical units.
+            self.move_pending = True
+            QTimer.singleShot(0, self.sample_motion)
         if mouse.buttons & 0x155:  # Left/right/middle/X1/X2 down edges.
             self.monitor.pointer_click(context=bool(mouse.buttons & 4))
         delta = mouse.wheel / 120

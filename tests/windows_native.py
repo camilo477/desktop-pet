@@ -48,6 +48,8 @@ def exercise_raw_delivery(app, pet, target):
     assert foreground() == int(target.winId())
     QCursor.setPos(target.mapToGlobal(QPoint(290, 190)))
     QTest.qWait(75)
+    pet.windows_input.sync_cursor()
+    origin = QCursor.pos()
     move = Input(0, InputData(mouse=MouseInput(x=10, y=-6, flags=1)))
     vertical = Input(0, InputData(mouse=MouseInput(data=120, flags=0x800)))
     horizontal = Input(0, InputData(mouse=MouseInput(data=-120, flags=0x1000)))
@@ -64,7 +66,9 @@ def exercise_raw_delivery(app, pet, target):
     assert foreground() == int(target.winId())
     assert activity.new_presses == 1 and 'ShiftLeft' in activity.pressed
     assert not activity.any_held and target.presses and target.releases
-    assert activity.motion_x > 0 and activity.motion_y < 0
+    observed = QCursor.pos() - origin
+    assert observed.x() > 0 and observed.y() < 0, 'The runner cursor did not move in the requested directions'
+    assert activity.motion_x > 0 and activity.motion_y < 0, 'Raw Input missed the controlled cursor movement'
     assert activity.scroll_x == -1 and activity.scroll_y == 1
     print('PASS: native keyboard make/repeat/break, mouse travel, both wheels and foreground delivery.')
 
