@@ -53,7 +53,8 @@ class PetWindow(QWidget):
         platform = QApplication.platformName().lower()
         self.native_mac = platform == "cocoa"
         self.mac_input = None
-        self.mask_supported = platform == "xcb" or platform.startswith("wayland")
+        # Cocoa needs a native shape for clicks to reach other windows.
+        self.mask_supported = platform in ("xcb", "cocoa") or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.native_windows = platform == "windows"
         self.windows_input = None
@@ -246,8 +247,8 @@ class PetWindow(QWidget):
         painter.scale(self.width() / 200.0, self.height() / 200.0)
         self.art.draw(painter, self.animations.pose)
         painter.end()
-        if self.native_windows or self.native_mac:
-            # These compositors hit-test the alpha surface in native resolution.
+        if self.native_windows:
+            # Windows hit-tests the alpha surface in native resolution.
             self.update()
             return
         now = time.monotonic()
