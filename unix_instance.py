@@ -74,7 +74,7 @@ def serve(directory: Path, ready_fd: int | None) -> int:
     except Exception as error:
         notify(ready_fd, f"ERROR: {error}")
         ready_fd = None
-        if ready_fd is None and not background_start:
+        if not background_start:
             raise
         return 1
     finally:

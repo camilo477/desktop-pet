@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import AppKit
 import objc
 from Quartz import CoreGraphics as CG
-from PySide6.QtCore import QEventLoop, QSettings, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop, QSettings, QTimer, Qt
+from PySide6.QtWidgets import QApplication, QWidget
 from macos_input import current_layout
 from pet import PetWindow
 
@@ -32,6 +32,45 @@ class Window(PetWindow):
         super().render_frame(*args, **kwargs)
 
 
+def desktop_checks(w):
+    # The only foreground target is this runner's own test window.
+    target = QWidget()
+    target.setGeometry(60, 60, 400, 360)
+    target.show()
+    w.move(85, 90)
+    w.show()
+    wait(150)
+    window = objc.objc_object(c_void_p=int(w.winId())).window()
+    behind = objc.objc_object(c_void_p=int(target.winId())).window()
+    view = window.contentView()
+
+    def hit(x, y):
+        point = view.convertPoint_toView_((x, y if view.isFlipped() else w.height() - y), None)
+        screen = window.convertPointToScreen_(point)
+        return AppKit.NSWindow.windowNumberAtPoint_belowWindowWithWindowNumber_(screen, 0)
+
+    head = w.art.head_position
+    assert hit(head.x(), head.y()) == window.windowNumber(), 'Opaque head must receive hits'
+    assert hit(2, 2) == behind.windowNumber(), 'Transparent corner must expose the window below'
+    if (os.environ.get('GITHUB_ACTIONS') == 'true' and w.mac_input.status == 'active'
+            and CG.CGPreflightPostEventAccess()):
+        # Target only this process. Some macOS versions deliver PID-directed
+        # events downstream of the session tap. Never post to another process.
+        w.timer.stop()
+        w.activity.snapshot()
+        from PySide6.QtCore import QSignalBlocker
+        with QSignalBlocker(w):
+            for down in (True, False):
+                event = CG.CGEventCreateKeyboardEvent(None, 0, down)
+                CG.CGEventPostToPid(os.getpid(), event)
+            wait(80)
+            state = w.activity.snapshot()
+        print('Own-process synthetic delivery observed by session tap:', 'A' in state.pulses)
+        w.timer.start(34)
+    target.close()
+    print('PASS: native WindowServer hit targets on the cat and behind its transparent corner.')
+
+
 def checks(w):
     backend = w.mac_input
     print('Native preflight:', bool(CG.CGPreflightListenEventAccess()), 'backend:', backend.status,
@@ -46,6 +85,7 @@ def checks(w):
     assert ns.level() == AppKit.NSNormalWindowLevel
     w.set_always_on_top(True)
     assert ns.level() == AppKit.NSFloatingWindowLevel
+    desktop_checks(w)
 
     # Native permission query above. Model denial/revocation without changing TCC.
     with patch.object(CG, 'CGPreflightListenEventAccess', return_value=False):

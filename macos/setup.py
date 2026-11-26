@@ -1,6 +1,8 @@
 """Build a native app or manage Miga's per-user installation."""
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import filecmp
 import json
 import os
@@ -8,6 +10,7 @@ from pathlib import Path
 import platform
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -81,9 +84,14 @@ def install(source):
             run('/usr/bin/ditto', source, app)
         else:
             app = build(stage)
-        run('/usr/bin/lipo', '-verify_arch', platform.machine(), app / 'Contents/MacOS/Miga')
+        # Phase 6B ships a thin 64-bit Mach-O per architecture. Reading its
+        # header also works on a destination Mac without Xcode command line tools.
+        with (app / 'Contents/MacOS/Miga').open('rb') as binary:
+            native_cpu = {'arm64': 0x0100000c, 'x86_64': 0x01000007}[platform.machine()]
+            if binary.read(8) != struct.pack('<II', 0xfeedfacf, native_cpu):
+                raise ValueError('Choose the Miga.app built for this Mac.')
         run('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
-        # Recheck after the build; another installer may have finished.
+        # Recheck the destinations before replacing anything.
         check_targets(owned())
         backup = stage / 'previous.app'
         if APP.exists():
@@ -97,7 +105,9 @@ def install(source):
                     created_cli = True
                     dst.write((HERE / 'miga').read_bytes())
                 CLI.chmod(0o755)
-            RECEIPT.write_text(json.dumps({'project': PROJECT, 'bundle': BUNDLE_ID}))
+            receipt = RECEIPT.with_suffix('.tmp')
+            receipt.write_text(json.dumps({'project': PROJECT, 'bundle': BUNDLE_ID}))
+            receipt.replace(RECEIPT)
         except BaseException:
             if created_cli:
                 CLI.unlink(missing_ok=True)
@@ -124,6 +134,20 @@ def uninstall():
     print('Miga removed. Preferences were kept.')
 
 
+@contextmanager
+def installation_lock():
+    RECEIPT.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(RECEIPT.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('Another Miga installation is in progress.') from None
+        yield
+    finally:
+        os.close(fd)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('install', 'build', 'uninstall'))
@@ -132,7 +156,9 @@ def main():
     if sys.platform != 'darwin':
         raise ValueError('Run this installer on macOS.')
     if args.action == 'uninstall':
-        uninstall()
+        if RECEIPT.parent.exists():
+            with installation_lock():
+                uninstall()
         return
     if platform.machine() not in ('arm64', 'x86_64') or tuple(map(int, platform.mac_ver()[0].split('.'))) < (14, 4):
         raise ValueError('Miga requires macOS 14.4 or later on Apple Silicon or Intel.')
@@ -143,7 +169,8 @@ def main():
     if not args.app and sys.version_info < (3, 11):
         raise ValueError('Use native Python 3.11 or newer (3.12 recommended).')
     if args.action == 'install':
-        install(args.app)
+        with installation_lock():
+            install(args.app)
     else:
         destination = ROOT / 'dist' / platform.machine()
         destination.mkdir(parents=True, exist_ok=True)
