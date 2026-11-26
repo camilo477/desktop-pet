@@ -22,6 +22,8 @@ def is_wayland(platform):
 
 
 def supports_global_input(platform):
+    if sys.platform == 'darwin':
+        return platform == 'cocoa'
     if sys.platform == 'win32':
         return platform == 'windows'
     return (sys.platform.startswith('linux') and platform == 'xcb'

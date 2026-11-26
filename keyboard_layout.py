@@ -1,6 +1,7 @@
 """Physical key positions and their common projection onto the cat's floor plane."""
 
 from dataclasses import dataclass
+import sys
 from keyboard_distributions import LEGENDS, TOP_ROW, HOME_ROW, BOTTOM_ROW, NUMBER_ROW
 
 FORMATS = {'60': '60 %', '65': '65 %', '75': '75 %', 'tkl': 'TKL', '100': '100 %'}
@@ -9,6 +10,10 @@ KEYBOARD_SCALE = .82
 KEY_TRAVEL = .35 * KEYBOARD_SCALE
 MOUSE_ANCHOR = (36.5, 153.5)  # Palm end of the original SVG mouse.
 REST = ((91., 157.), (115., 157.))
+
+MAC_LABELS = {'MetaLeft': '⌘', 'MetaRight': '⌘', 'AltLeft': '⌥', 'AltRight': '⌥',
+              'CtrlLeft': '⌃', 'CtrlRight': '⌃', 'ShiftLeft': '⇧', 'ShiftRight': '⇧',
+              'Enter': '↩', 'NumpadEnter': '⌤', 'Backspace': '⌫', 'Delete': '⌦', 'CapsLock': '⇪'}
 
 BASE_LABELS = {
     **dict(zip(NUMBER_ROW, '`1234567890-=', strict=True)),
@@ -149,4 +154,6 @@ class Keyboard:
                 160 + KEYBOARD_SCALE * (v * 4.6 + u * .025))
 
     def label(self, identifier):
+        if sys.platform == 'darwin' and identifier in MAC_LABELS:
+            return MAC_LABELS[identifier]
         return LEGENDS[self.layout].get(identifier, BASE_LABELS.get(identifier, identifier))

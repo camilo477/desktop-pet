@@ -51,7 +51,9 @@ class PetWindow(QWidget):
         self.reactions = self.settings.value("reactions", True, type=bool)
         self.paused = self.settings.value("paused", False, type=bool)
         platform = QApplication.platformName().lower()
-        self.mask_supported = platform == "xcb" or platform.startswith("wayland")
+        self.native_mac = platform == "cocoa"
+        self.mac_input = None
+        self.mask_supported = platform in ("xcb", "cocoa") or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.native_windows = platform == "windows"
         self.windows_input = None
@@ -78,6 +80,8 @@ class PetWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         if platform == "xcb":
             self.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus)
+        if self.native_mac:
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -127,8 +131,19 @@ class PetWindow(QWidget):
         if self.global_input and self.native_windows:
             from windows_input import WindowsInput
             self.windows_input = WindowsInput(self.activity)
+        if self.native_mac:
+            from macos_input import MacInput
+            from macos_window import prepare_panel
+            prepare_panel(self)
+            self.mac_input = MacInput(self.activity, self.mac_status_changed)
         self.render_frame()
         self.refresh_activity()
+
+    def mac_status_changed(self, status):
+        from macos_window import permission_notice
+        if status == 'active':
+            self._had_input_access = True
+        permission_notice(self, status)
 
     def clamp_position(self, position: QPoint) -> QPoint:
         return visible_position(position, self.size(),
@@ -146,6 +161,8 @@ class PetWindow(QWidget):
         self.activity.set_enabled(self.reactions and not self.paused)
         if self.windows_input:
             self.windows_input.configure(int(self.winId()) if self.activity.enabled else None)
+        if self.mac_input:
+            self.mac_input.configure(self.activity.enabled)
         if not self.reactions or self.paused:
             self.animations.clear_input()
             self.render_frame()
@@ -159,6 +176,8 @@ class PetWindow(QWidget):
         now = time.monotonic()
         if self.windows_input:
             self.windows_input.poll(now)
+        if self.mac_input:
+            self.mac_input.poll(now)
         if self._menu is not None and self.animations.sleeping and self.menu_has_pointer():
             self.activity.discard_menu_pointer()
         context_target = self.cursor_on_pet if self.animations.sleeping else None
@@ -171,7 +190,7 @@ class PetWindow(QWidget):
             self.local_pointer = None
         cursor_point = self.local_pointer
         if self.reactions and now - activity.mouse < .65:
-            if self.global_input:
+            if self.global_input and (not self.mac_input or self.activity.native_pointer):
                 cursor = QCursor.pos() - self.pos()
                 cursor_point = QPointF(cursor) * (200 / self.width())
                 screen = self.screen() or QApplication.primaryScreen()
@@ -271,6 +290,9 @@ class PetWindow(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        if self.native_mac:
+            from macos_window import prepare_panel
+            prepare_panel(self)
         self.render_frame(force_mask=True)
 
     def event(self, event) -> bool:
@@ -302,7 +324,8 @@ class PetWindow(QWidget):
             self.dragging = False
             self.system_drag = False
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self.activity.pointer_click()
+            if not self.mac_input or not self.activity.native_pointer:
+                self.activity.pointer_click()
             if not self.paused:
                 self.animations.interact()
                 if self.timer.interval() > 34:
@@ -546,6 +569,9 @@ class PetWindow(QWidget):
             action.triggered.connect(lambda checked, value=size: self.set_size(value))
         self.keyboard_menu(menu)
         self.appearance_menu(menu)
+        if self.mac_input:
+            from macos_window import permission_menu
+            permission_menu(self, menu)
         for label, checked, callback in (
             ("Siempre visible", self.always_on_top, self.set_always_on_top),
             ("Reaccionar a actividad", self.reactions, self.set_reactions),
@@ -596,6 +622,8 @@ class PetWindow(QWidget):
         self.position_timer.stop()
         if self.windows_input:
             self.windows_input.configure(None)
+        if self.mac_input:
+            self.mac_input.close()
         self.activity.stop()
         self.save_preferences()
         if self._menu is not None:
