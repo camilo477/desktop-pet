@@ -121,7 +121,7 @@ while the body regains its balance. The next pointer movement starts from the
 release position. Empty areas allow clicks through where supported.
 
 The right-click menu offers **Tamaño** (150, 200 or 300
-logical pixels), **Teclado**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
+logical pixels), **Teclado**, **Apariencia**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
 Pausing stops the animation timer and input listeners while keeping dragging
@@ -149,6 +149,26 @@ asleep seated. Its own movements leave the inactivity timer running. A held
 key keeps it awake. Input or a direct click wakes it smoothly.
 Sleep runs at about 10 FPS; pausing stops rendering entirely. These intervals
 are simple constants in `animations.py`.
+
+## Choosing a coat and facial colors
+
+Right-click Miga and open **Apariencia**. The default **Miga original** keeps
+the original charcoal fur, gold eyes and dark nose.
+
+- **Pelaje** offers original charcoal, solid black, orange tabby, blue-gray,
+  gray tabby, warm white, black-and-white bicolor, tuxedo, Siamese colorpoint,
+  calico and tortoiseshell.
+- **Ojos** offers automatic, gold, amber, green, blue, hazel, copper, gray
+  and heterochromia (one blue eye and one green eye).
+- **Nariz** offers automatic, black, dark gray, pink and warm brown. Automatic
+  eye and nose colors follow the coat. Manual choices carry over across coats.
+- **Restaurar apariencia original** restores the charcoal coat and both
+  automatic colors. The keyboard, window and activity settings keep their values.
+
+Changes appear on the current pose, including during sleep or pause, and are
+saved for the next launch. Face markings follow the projected face, body patches
+follow the chest, and leg and tail markings bend with their surfaces. All coats
+share the same anatomy, hit targets, expressions and behavior. All artwork is local.
 
 ## Choosing a keyboard
 

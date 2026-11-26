@@ -3,7 +3,12 @@
 import math
 
 MAX_REACH = 78.0
+FACE_RX, FACE_RY, FACE_DEPTH = 35, 28, 23
 EAR_ANCHORS = {-1: (82, 57), 1: (125, 57)}
+
+
+def face_depth(x, y):
+    return FACE_DEPTH * math.sqrt(max(0.0, 1 - (x / FACE_RX) ** 2 - (y / FACE_RY) ** 2))
 
 
 class BodyGeometry:
@@ -80,7 +85,7 @@ class FaceGeometry:
 
     def point(self, x, y, depth=None):
         if depth is None:
-            depth = 23 * math.sqrt(max(0.0, 1 - (x / 35) ** 2 - (y / 28) ** 2))
+            depth = face_depth(x, y)
         horizontal = x * self.cos_y + depth * self.sin_y
         forward = depth * self.cos_y - x * self.sin_y
         vertical = y * self.cos_p + forward * self.sin_p

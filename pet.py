@@ -1,5 +1,6 @@
 """Transparent desktop window and the original layered character."""
 
+from dataclasses import replace
 import math
 import time
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from keyboard_distributions import DISTRIBUTIONS
 from keyboard_layout import FORMATS, STANDARDS, Keyboard
+from appearance import Appearance, COATS, EYES, NOSES
 from animations import Animations
 from character import CatArt
 from activity import Activity, ActivityMonitor, supports_global_input
@@ -77,7 +79,10 @@ class PetWindow(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setFixedSize(size if size in SIZES else 200, size if size in SIZES else 200)
-        self.art = CatArt(self.keyboard)
+        look = Appearance(self.preference('coat', COATS, 'original', 'appearance'),
+                          self.preference('eyes', EYES, 'auto', 'appearance'),
+                          self.preference('nose', NOSES, 'auto', 'appearance'))
+        self.art = CatArt(self.keyboard, look)
         self.art.cache(self.width(), self.devicePixelRatioF())
         self.animations = Animations(self.keyboard)
         self.last_frame = time.monotonic()
@@ -144,7 +149,10 @@ class PetWindow(QWidget):
 
     def tick(self) -> None:
         now = time.monotonic()
-        activity = self.activity.snapshot() if self.reactions else Activity()
+        if self._menu is not None and self.animations.sleeping and self.menu_has_pointer():
+            self.activity.discard_menu_pointer()
+        context_target = self.cursor_on_pet if self.animations.sleeping else None
+        activity = self.activity.snapshot(context_target) if self.reactions else Activity()
         if self.reactions and self.detected_layout != activity.layout:
             self.detected_layout = activity.layout
             self.keyboard.layout = self.effective_layout()
@@ -164,8 +172,9 @@ class PetWindow(QWidget):
                             math.tanh((cursor.y() - head.y()) / max(1, area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
-        if self.press_position is not None or self._menu is not None:
+        if self.press_position is not None:
             self.animations.interact()
+        if self.press_position is not None or self._menu is not None:
             cursor_point = None
         if (self.press_region == 'head' and not self.dragging and not self.animations.pet_held
                 and now - self.press_time >= PET_HOLD_SECONDS):
@@ -415,8 +424,8 @@ class PetWindow(QWidget):
             self.settings.setValue(key, value)
         self.settings.sync()
 
-    def preference(self, name, choices, default):
-        value = self.settings.value(f'keyboard/{name}', default, type=str)
+    def preference(self, name, choices, default, group='keyboard'):
+        value = self.settings.value(f'{group}/{name}', default, type=str)
         return value if value in choices else default
 
     def effective_layout(self):
@@ -462,14 +471,40 @@ class PetWindow(QWidget):
             ('Formato', 'form', FORMATS, self.keyboard.form),
             ('Estándar físico', 'standard', {s: s for s in STANDARDS}, self.keyboard.standard),
         ):
-            submenu = menu.addMenu(title)
-            group = QActionGroup(submenu)
-            for value, label in options.items():
-                action = submenu.addAction(label)
-                action.setCheckable(True)
-                group.addAction(action)
-                action.setChecked(value == current)
-                action.triggered.connect(lambda checked, k=parameter, v=value: self.configure_keyboard(**{k: v}))
+            self.choice_menu(menu, title, options, current,
+                             lambda v, k=parameter: self.configure_keyboard(**{k: v}))
+
+    @staticmethod
+    def choice_menu(parent, title, options, current, choose):
+        submenu = parent.addMenu(title)
+        group = QActionGroup(submenu)
+        for value, label in options.items():
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            group.addAction(action)
+            action.setChecked(value == current)
+            action.triggered.connect(lambda checked, v=value: choose(v))
+
+    def configure_appearance(self, look):
+        if look == self.art.appearance:
+            return
+        self.art.set_appearance(look)
+        self.render_frame()
+        for key in ('coat', 'eyes', 'nose'):
+            self.settings.setValue(f'appearance/{key}', getattr(look, key))
+        self.settings.sync()
+
+    def appearance_menu(self, parent):
+        menu = parent.addMenu('Apariencia')
+        for title, field, choices in (
+            ('Pelaje', 'coat', {k: c.name for k,c in COATS.items()}),
+            ('Ojos', 'eyes', {k: c[0] for k,c in EYES.items()}),
+            ('Nariz', 'nose', {k: c[0] for k,c in NOSES.items()}),
+        ):
+            self.choice_menu(menu, title, choices, getattr(self.art.appearance, field),
+                             lambda v, k=field: self.configure_appearance(replace(self.art.appearance, **{k:v})))
+        menu.addSeparator()
+        menu.addAction('Restaurar apariencia original', lambda: self.configure_appearance(Appearance()))
 
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -483,6 +518,7 @@ class PetWindow(QWidget):
             sizes.addAction(action)
             action.triggered.connect(lambda checked, value=size: self.set_size(value))
         self.keyboard_menu(menu)
+        self.appearance_menu(menu)
         for label, checked, callback in (
             ("Siempre visible", self.always_on_top, self.set_always_on_top),
             ("Reaccionar a actividad", self.reactions, self.set_reactions),
@@ -499,15 +535,29 @@ class PetWindow(QWidget):
     def contextMenuEvent(self, event) -> None:
         if self._menu is not None:
             return
-        if not self.paused:
-            self.animations.interact()
+        if self.animations.sleeping:
+            self.activity.discard_menu_pointer()
         self._menu = self.build_menu()
         self._menu.aboutToHide.connect(self.clear_menu)
         self._menu.popup(event.globalPos())
         event.accept()
 
+    def cursor_on_pet(self):
+        return QApplication.widgetAt(QCursor.pos()) is self
+
+    def menu_has_pointer(self):
+        pos = QCursor.pos()
+        active = QApplication.activePopupWidget()
+        while isinstance(active, QMenu):
+            if active.rect().contains(active.mapFromGlobal(pos)):
+                return True
+            active = active.parentWidget()
+        return False
+
     def clear_menu(self) -> None:
         if self._menu is not None:
+            if self.animations.sleeping and self.menu_has_pointer():
+                self.activity.discard_menu_pointer()
             self._menu.deleteLater()
             self._menu = None
 

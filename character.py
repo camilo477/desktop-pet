@@ -10,21 +10,13 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, 
 from PySide6.QtSvg import QSvgRenderer
 
 from appearance import Appearance, COATS, EYES, NOSES
+from coat_patterns import Markings, cubic_path as curve
 from animations import Pose, mix, smoothstep
 from anatomy import BodyGeometry, FaceGeometry
 from keyboard_layout import Keyboard, KEYBOARD_SCALE, KEY_TRAVEL
 from personality import DROWSY
 
 BODY_TONES = ('neck-shade', 'chest-volume', 'hip-left', 'hip-right')
-
-
-def curve(points):
-    path = QPainterPath()
-    path.moveTo(*points[0])
-    for i in range(1, len(points), 3):
-        path.cubicTo(*points[i], *points[i + 1], *points[i + 2])
-    path.closeSubpath()
-    return path
 
 
 def polygon(points):
@@ -106,6 +98,9 @@ class CatArt:
             self.pupil = self.original['pupils']
             self.body_tones = {k: color(c, k) for k, c in zip(BODY_TONES,
                                (coat.shade, coat.light, coat.light, coat.shade))}
+            self.eye_edge = QPen(self.foreleg.darker(165), .90) if self.fur.lightness() > 105 else None
+            self.fur_edge = QPen(self.fur.darker(114), .9) if self.fur.lightness() > 200 else None
+            self.markings = Markings(coat) if coat.pattern else None
             self.coat_layers_dirty = True
         eye = coat.eyes if appearance.eyes == 'auto' else appearance.eyes
         eye_pair = ('blue', 'green') if eye == 'odd' else (eye, eye)
@@ -114,6 +109,11 @@ class CatArt:
         self.iris = self.irises[0]
         nose = NOSES[appearance.nose][1] or coat.nose
         self.nose = QColor(nose) if nose else self.pupil
+        self.nose_edge = None
+        if nose and min(abs(self.nose.lightness() - c.lightness()) for c in
+                        (self.face_tone, self.head_fur)) < 50:
+            edge = self.nose.darker(150) if self.nose.lightness() > 100 else self.nose.lighter(185)
+            self.nose_edge = QPen(edge, .5)
         self.appearance = appearance
         self.sleep_face = None
 
@@ -222,9 +222,13 @@ class CatArt:
         outline = curve([body.map(x, y) for x, y in self.shapes['body']])
         self.hits.append(('torso', outline))
         p.drawPath(outline)
-        p.save(); p.setClipPath(outline)
+        p.save(); p.setClipPath(outline, Qt.ClipOperation.IntersectClip)
         for name, color in self.body_tones.items():
             p.setBrush(color); p.drawPath(curve([body.map(x, y) for x, y in self.shapes[name]]))
+        if self.markings:
+            self.markings.draw_body(p, body)
+        if self.fur_edge:
+            p.strokePath(outline, self.fur_edge)
         p.restore()
 
     def _tail(self, p, pose, body):
@@ -254,6 +258,8 @@ class CatArt:
         outline = curve(warped)
         self.hits.append(('tail', outline))
         p.drawPath(outline)
+        if self.markings:
+            self.markings.draw_tail(p, outline, warped)
 
     @staticmethod
     def shoulder(side, pose):
@@ -309,6 +315,8 @@ class CatArt:
         p.setBrush(self.foreleg.lighter(100 + tone) if tone else self.foreleg)
         self.hits.append(('paw', path))
         p.drawPath(path)
+        if self.markings:
+            self.markings.draw_arm(p, side, path, left, right)
 
     def region_at(self, point):
         return next((region for region, path in reversed(self.hits) if path.contains(point)), None)
@@ -336,16 +344,20 @@ class CatArt:
             p.setBrush(self.ears[int(side > 0)]); p.drawPath(path)
             self.head_hit_paths.append(path)
             inner = self.shapes['ear-inner-left' if side < 0 else 'ear-inner-right']
-            p.save(); p.setClipPath(path); p.setBrush(self.ear_inner)
+            p.save(); p.setClipPath(path, Qt.ClipOperation.IntersectClip); p.setBrush(self.ear_inner)
             p.drawPath(curve([ear_point(x, y) for x, y in inner])); p.restore()
         p.setBrush(self.head_fur)
         shape = curve([face.outline(x - 101, y - 77) for x, y in self.shapes['head-shape']])
         p.drawPath(shape); self.head_hit_paths.append(shape)
         blink = max(pose.blink, pose.yawn * .92,
                     pose.groom * (.65 if pose.action == 'wash' else .2))
-        p.save(); p.setClipPath(shape)
+        p.save(); p.setClipPath(shape, Qt.ClipOperation.IntersectClip)
         p.setBrush(self.face_tone)
         p.drawPath(curve([face.point(x - 101, y - 77) for x, y in self.shapes['face-volume']]))
+        if self.markings:
+            self.markings.draw_face(p, face, shape)
+        if self.fur_edge:
+            p.strokePath(shape, self.fur_edge)
         for side in (-1, 1):
             ex, ey = side * 13.7, -1.15
             width = 8.45
@@ -360,6 +372,8 @@ class CatArt:
                               face.point(ex - width * .65, ey + bottom + slope * .3), left])
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.irises[int(side > 0)]); p.drawPath(aperture)
             p.save(); p.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
+            if self.eye_edge and blink < .85:
+                p.strokePath(aperture, self.eye_edge)
             px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5
             py = ey + pose.gaze_y * 2.0
             radius = pose.expression.pupil
@@ -375,7 +389,13 @@ class CatArt:
                             *face.point(ex + width * .65, ey + 1.1), *face.point(ex + width, ey))
                 p.setPen(QPen(self.lid_color, .65)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPath(lid)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.nose)
-        p.drawPath(polygon([face.point(-1.2, 10), face.point(1.2, 10), face.point(0, 11.3)]))
+        nose = polygon([face.point(-1.2, 10), face.point(1.2, 10), face.point(0, 11.3)])
+        p.drawPath(nose)
+        if self.nose_edge:
+            p.save()
+            p.setClipPath(nose, Qt.ClipOperation.IntersectClip)
+            p.strokePath(nose, self.nose_edge)
+            p.restore()
         if pose.yawn > .03 or pose.tongue > .03:
             p.setBrush(self.pupil)
             mouth = []

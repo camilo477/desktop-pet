@@ -84,6 +84,7 @@ class ActivityMonitor:
         self._dragging = False
         self._wake_callback = wake_callback
         self._notice_pending = False
+        self._context_click = False
 
     def _notify(self):
         # One queued UI notice per snapshot, even during dense pointer input.
@@ -240,9 +241,8 @@ class ActivityMonitor:
         self.pointer_moved(x, y)
 
     def _click(self, x, y, button, pressed):
-        del x, y, button
         if pressed:
-            self.pointer_click()
+            self.pointer_click(context=button.name == 'right')
 
     def _scroll(self, x, y, dx, dy):
         del x, y
@@ -290,9 +290,19 @@ class ActivityMonitor:
             self._pointer_distance = 0.0
             self._activity = replace(self._activity, mouse=-math.inf)
 
-    def pointer_click(self):
+    def discard_menu_pointer(self):
+        # Navigating Miga's own popup while asleep is an explicit control. Retain
+        # all keyboard edges and the current pointer coordinates for the next move.
+        with self._lock:
+            self._activity = replace(self._activity, mouse=-math.inf, click=-math.inf, scroll=-math.inf)
+            self._motion[:] = (0.0, 0.0)
+            self._wheel[:] = (0.0, 0.0)
+            self._pointer_distance = self._wheel_distance = 0.0
+
+    def pointer_click(self, context=False):
         with self._lock:
             if self.enabled:
+                self._context_click = context
                 self._activity = replace(self._activity, click=time.monotonic())
                 self._notify()
 
@@ -300,7 +310,7 @@ class ActivityMonitor:
         self._down.clear(); self._releases.clear(); self._pulses.clear()
         self._hints = [KeyHint(), KeyHint()]; self._latest = KeyHint()
 
-    def snapshot(self):
+    def snapshot(self, context_target=None):
         now = time.monotonic()
         listener = self._keyboard_listener
         if self.enabled and listener and self._reader and now >= self._next_layout_check:
@@ -320,6 +330,11 @@ class ActivityMonitor:
             except Exception:
                 pass
         with self._lock:
+            if self._context_click:
+                # RECORD can deliver the right click before Qt opens the local popup.
+                if context_target is not None and context_target():
+                    self._activity = replace(self._activity, click=-math.inf)
+                self._context_click = False
             if self._keyboard_listener is not None and not self._keyboard_listener.is_alive():
                 self._clear_keys(); self._reader = None
                 if self._activity.layout is not None:
@@ -367,6 +382,7 @@ class ActivityMonitor:
         with self._lock:
             self.enabled = False
             self._activity = Activity()
+            self._context_click = False
             self._clear_keys()
             self._next_layout_check = 0.0
             self._next_reconcile = 0.0
