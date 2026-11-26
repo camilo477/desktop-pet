@@ -5,6 +5,7 @@ import math
 import random
 
 from activity import Activity, KeyHint
+from drag_motion import DragMotion
 from keyboard_layout import Keyboard, KEY_TRAVEL, REST
 from anatomy import BodyGeometry, FaceGeometry
 from idle_motion import DURATIONS, QUIET, STILL, IdleMotion, sample, smoothstep
@@ -16,6 +17,7 @@ IDLE_ACTION_AFTER = 15.0
 RELAX_AFTER = 60.0
 SLEEP_AFTER = 180.0
 IDLE_ACTION_GAP = (12.0, 27.0)
+UNSTEADY = Expression(opening=.70, pupil=4.1, ears=19, whiskers=1.8)
 
 
 def approach(value, target, speed, dt):
@@ -60,6 +62,8 @@ class Pose:
     lift: float = 0.0
     sway_x: float = 0.0
     sway_y: float = 0.0
+    tail_sway: float = 0.0
+    dizzy: float = 0.0
     left_x: float = REST[0][0]
     left_y: float = REST[0][1]
     right_x: float = REST[1][0]
@@ -173,7 +177,8 @@ class Animations:
         self.ear_touches = [-math.inf, -math.inf]
         self.tail_touch_start = -math.inf
         self.near_face = False
-        self.carried = False
+        self.drag = None
+        self.release_dizzy = 0.
         self.lift_start = self.release_stamp = -math.inf
         self.lift_velocity = self.sway_vx = self.sway_vy = 0.0
         self.sleep_goal = 0.0
@@ -192,8 +197,14 @@ class Animations:
     def sleeping(self):
         return self.pose.sleep > .99 and self.sleep_goal > .99
 
+    @property
+    def carried(self):
+        return self.drag is not None
+
     def interact(self):
         self.touch_pending = True
+        if self.release_dizzy:
+            self.release_dizzy = self.pose.dizzy = 0.
 
     def pet(self, side=0.0, held=False):
         self.interact()
@@ -221,9 +232,9 @@ class Animations:
         elif region == 'tail' and self.time - self.tail_touch_start >= .58:
             self.tail_touch_start = self.time
 
-    def lift(self):
+    def lift(self, now=None):
         self.interact()
-        self.carried = True
+        self.drag = DragMotion(now)
         self.lift_start = self.time
         if self.pet_held or self.pose.pet or self.time - self.pet_start < .78:
             self.release_pet(quick=True)
@@ -234,27 +245,30 @@ class Animations:
             paw.key = paw.ready = None
 
     def put_down(self, now):
-        self.carried = False
+        self.drag = None
         self.release_stamp = self.last_hint = now
         # A small compression proportional to how far the haunches actually rose.
         self.lift_velocity = -26 * max(0, self.pose.lift)
         self.interact()
+        self.release_dizzy = self.pose.dizzy
 
-    def _suspension(self, dt, delta):
+    def _suspension(self, dt, now, delta):
         pose = self.pose
-        if not (self.carried or pose.lift or pose.sway_x or pose.sway_y):
+        if not (self.carried or pose.lift or pose.sway_x or pose.sway_y or pose.tail_sway):
             return
         horizontal = vertical = 0.0
         if self.carried:
-            travel = max(dt, 1 / 120) * 690
-            horizontal = -6.2 * math.tanh(delta[0] / travel)
-            vertical = -3.4 * math.tanh(delta[1] / travel)
+            if delta is not None:
+                self.drag.observe(*delta, now)
+            horizontal, vertical, intensity = self.drag.targets(now, dt)
+            pose.dizzy = approach(pose.dizzy, intensity, 5, dt)
         pose.lift, self.lift_velocity = spring(pose.lift, self.lift_velocity,
                                                6.5 if self.carried else 0, 13, dt)
         pose.sway_x, self.sway_vx = spring(pose.sway_x, self.sway_vx, horizontal, 16, dt)
         pose.sway_y, self.sway_vy = spring(pose.sway_y, self.sway_vy, vertical, 16, dt)
-        if not self.carried and max(abs(pose.lift), abs(pose.sway_x), abs(pose.sway_y)) < .005:
-            pose.lift = pose.sway_x = pose.sway_y = 0.0
+        pose.tail_sway = approach(pose.tail_sway, pose.sway_x, 10, dt)
+        if not self.carried and max(abs(pose.lift), abs(pose.sway_x), abs(pose.sway_y), abs(pose.tail_sway)) < .005:
+            pose.lift = pose.sway_x = pose.sway_y = pose.tail_sway = 0.0
             self.lift_velocity = self.sway_vx = self.sway_vy = 0.0
 
     def set_keyboard(self, keyboard, held):
@@ -449,12 +463,20 @@ class Animations:
         pose.mouse_dx, pose.mouse_dy = positions
 
     def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0), face_offset=None,
-                drag_delta=(0.0, 0.0), desktop_idle=None):
+                drag_delta=None, desktop_idle=None):
         pose = self.pose
         if self.carried:
             self.interact()
-        self._suspension(dt, drag_delta)
+        self._suspension(dt, now, drag_delta)
         observed = max(activity.keyboard, activity.mouse, activity.click, activity.scroll)
+        if self.release_dizzy:
+            if activity.any_held or activity.held or observed > self.release_stamp:
+                self.release_dizzy = pose.dizzy = 0.
+            else:
+                duration = .8 + 3.5 * self.release_dizzy
+                pose.dizzy = self.release_dizzy * smoothstep(1 - (now - self.release_stamp) / duration)
+                if not pose.dizzy:
+                    self.release_dizzy = 0.
         if self.last_activity is None:
             self.last_activity = now
         prior_idle = now - self.last_activity
@@ -511,6 +533,12 @@ class Animations:
             if not self.carried:
                 surprise *= min(1, pose.lift / 6.5)
             expression = expression.blend(SURPRISED, .65 * surprise)
+        roll = nod = 0.
+        if pose.dizzy:
+            phase = (self.time - self.lift_start) * 6.6
+            roll = pose.dizzy * math.sin(phase)
+            nod = pose.dizzy * math.cos(phase)
+            expression = expression.blend(UNSTEADY, pose.dizzy)
         pose.expression = expression
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
@@ -534,6 +562,7 @@ class Animations:
         # A flexible tip moves in bouts; the root stays planted.
         bout = (.5 - .5 * math.cos(self.tip_phase / 3))
         pose.tail_tip = expression.tail * math.sin(self.tip_phase) * bout * (1 - pose.sleep)
+        pose.tail_tip -= 3.6 * roll
         mouse_active = not self.carried and now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 10, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 12, dt)
@@ -587,12 +616,16 @@ class Animations:
             look = (0, -pose.yawn * .2)
         else:
             look = (0, .10)
+        if pose.dizzy:
+            look = (look[0] - .72 * nod, look[1] + .40 * roll)
         look = (mix(look[0], pose.pet_side * .32, pose.pet), mix(look[1], .3, pose.pet))
         if sleep_target:
             look = (look[0] * (1 - pose.sleep), look[1] * (1 - pose.sleep))
         look = tuple(max(-1, min(1, value)) for value in look)
         # All three channels receive attention directly, rather than filtering each other.
-        pose.gaze_x = approach(pose.gaze_x, look[0], 24, dt)
+        # The eyes briefly counter-roll as the head tries to level itself.
+        eye_x = max(-1., min(1., look[0] - .46 * roll)) if pose.dizzy else look[0]
+        pose.gaze_x = approach(pose.gaze_x, eye_x, 24, dt)
         pose.gaze_y = approach(pose.gaze_y, look[1], 24, dt)
         head_speed = 13 if key_point else 11
         if not key_point and not mouse_active:
@@ -601,7 +634,7 @@ class Animations:
         pose.head_y, self.head_velocity[1] = spring(pose.head_y, self.head_velocity[1], look[1], head_speed, dt)
         toward = max(-1, min(1, look[0] * 1.8))
         tilt = look[0] * 3.5 + toward * expression.tilt + pose.pet_side * pose.pet * 8
-        tilt += ear_lean * 3 + pose.sway_x * .68
+        tilt += ear_lean * 3 + pose.sway_x * .82 + 12 * roll
         if playing and self.action_kind == 'look':
             tilt += self.look_side * action * 2
         pose.head_tilt, self.head_velocity[2] = spring(pose.head_tilt, self.head_velocity[2], tilt, 14, dt)
@@ -615,8 +648,8 @@ class Animations:
             mouse_lean = -15 + (self.keyboard.mouse_offset + pose.mouse_dx) * .55
             target_x = mix(mouse_lean, target_x, .18) if key_point else mouse_lean
             target_y = max(target_y, 10 + pose.mouse_dy * .32)
-        target_x += motion.lean
-        target_y += motion.drop
+        target_x += motion.lean - 4.2 * roll
+        target_y += motion.drop + 1.5 * nod
         if pose.groom > 0:
             target_x -= pose.groom * 1.6
             target_y += pose.groom * 1.8
@@ -632,6 +665,9 @@ class Animations:
         pose.ear_right += (swivel + spread) * (1 - pose.sleep) + pose.balance_velocity * .009
         pose.ear_left += motion.swivel * (.2 if motion.rub and pose.action_side > 0 else 1) + pose.sway_x * .8
         pose.ear_right += motion.swivel * (.2 if motion.rub and pose.action_side < 0 else 1) + pose.sway_x * .7
+        ear_flex = (pose.sway_x - pose.tail_sway) * 1.3 + 3 * nod
+        pose.ear_left += ear_flex
+        pose.ear_right += ear_flex
         body = BodyGeometry(pose)
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
@@ -640,7 +676,8 @@ class Animations:
             offset = motion.left if index == 0 else motion.right
             if self.carried:
                 sx, sy = body.shoulder(side)
-                paw.aim('lift', (sx - side * 6 + pose.sway_x * .45, sy + 25 + index * 2))
+                paw.aim('lift', (sx - side * 6 + pose.sway_x * .57,
+                                 sy + 25 + index * 2 + pose.sway_y * .32))
             elif index == MOUSE_PAW and mouse_active:
                 paw.aim('mouse', (self.keyboard.mouse_rest[0] + pose.mouse_dx, self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in self.keyboard.by_id:
@@ -655,6 +692,8 @@ class Animations:
                 paw.aim('ear_rub', (mix(rest[0], x, motion.rub), mix(rest[1], y + 3.5, motion.rub)))
             elif playing and offset is not None:
                 paw.aim(self.action_kind, (rest[0] + offset[0], rest[1] + offset[1]))
+            elif pose.dizzy:
+                paw.aim('brace', (rest[0] + side * 3 * pose.dizzy, rest[1] - max(0., side * roll) * 2.6))
             elif paw.ready is not None and now < paw.ready_until:
                 paw.aim('ready', paw.ready)
             else:

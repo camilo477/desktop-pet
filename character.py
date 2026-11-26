@@ -251,8 +251,8 @@ class CatArt:
                 bend = math.sin(math.pi * phase) ** 2 * weight
                 x -= 4.4 * bend
                 y -= (5 + 2 * math.sin(math.tau * phase)) * bend
-            if pose.lift or pose.sway_x or pose.sway_y:
-                x += pose.sway_x * .65 * weight
+            if pose.lift or pose.sway_x or pose.sway_y or pose.tail_sway:
+                x += mix(pose.sway_x * .65, pose.tail_sway * .95, weight) * weight
                 y += (pose.sway_y * .8 - pose.lift * .38) * weight
             warped.append(body.map(x, y))
         outline = curve(warped)
@@ -362,6 +362,8 @@ class CatArt:
             ex, ey = side * 13.7, -1.15
             width = 8.45
             opening = pose.expression.opening
+            if pose.dizzy:
+                opening *= 1 + side * (.21 + .13 * pose.gaze_x) * pose.dizzy
             top = mix(-9.6 * opening, 1.1, blink)
             bottom = mix(8.1 * (.4 + .6 * opening), 1.1, blink)
             slope = side * pose.expression.slant * (1 - blink)

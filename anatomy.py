@@ -20,7 +20,7 @@ class BodyGeometry:
                   + pose.pet * 1.1 + contact_dip)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
         self.mouse_reach = pose.mouse
-        self.shoulder_roll = pose.motion.shoulders
+        self.shoulder_roll = pose.motion.shoulders + .19 * pose.sway_x
 
     def map(self, x, y):
         # Zero deformation at the floor: the haunches do not slide with the chest.

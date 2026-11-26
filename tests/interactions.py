@@ -4,6 +4,7 @@ from dataclasses import replace
 import math
 import os
 from pathlib import Path
+import random
 import sys
 from tempfile import TemporaryDirectory
 import time
@@ -167,11 +168,11 @@ def check_drag(window):
                 assert pose.pressed == {'P'} and all(paw.goal == 'lift' for paw in a.paws)
                 assert (pose.mouse_dx, pose.mouse_dy) == shell and not a.mouse_contact
             assert pose.lift > 6 and pose.left_y < 143 and pose.right_y < 143
-            for component, delta in ((pose.sway_x, dx), (pose.sway_y, dy)):
+            for component, delta, limit in ((pose.sway_x, dx, 8.7), (pose.sway_y, dy, 4.6)):
                 if delta:
-                    assert component * delta < 0 and abs(component) < 6.3
+                    assert component * delta < 0 and abs(component) <= limit
                 else:
-                    assert abs(component) < .005
+                    assert abs(component) < .025  # End of the damped braking response.
             frame = painted(window, pose)
             assert frame != painted(window, replace(pose, lift=0, left_y=before.left_y,
                                                    right_y=before.right_y))
@@ -214,12 +215,18 @@ def check_drag(window):
     monitor.set_dragging(True)
     monitor.pointer_moved(470, 120)
     monitor.key_down('A')
+    monitor.key_down('S', server_time=11)
     state = monitor.snapshot()
-    assert state.motion_x == state.motion_y == 0 and state.held == {'A'}
+    assert state.motion_x == state.motion_y == 0 and state.held == {'A', 'S'}
+    monitor.key_up('S', server_time=12)
     monitor.set_dragging(False)
     monitor.pointer_moved(473, 119)
     state = monitor.snapshot()
     assert (state.motion_x, state.motion_y) == (3, -1)
+    assert state.held == state.pressed == {'A'}
+    monitor.key_down('S', server_time=12)  # Matching X11 repeat across release.
+    state = monitor.snapshot()
+    assert state.held == {'A', 'S'} and not state.new_presses
     monitor.stop()
 
     window.animations = Animations()
@@ -263,6 +270,118 @@ def check_drag(window):
     assert not window.dragging and not window.timer.isActive()
 
 
+def trace_while_lifted(path, fps=30, duration=3.2):
+    a = Animations()
+    a.lift(0)
+    rng = random.Random(19)
+    t = peak = 0.
+    while t < duration:
+        dt = min(rng.uniform(.82, 1.18) / fps, duration - t)
+        x, y = path(t)
+        u, v = path(t + dt)
+        t += dt
+        a.advance(min(.1, dt), t, drag_delta=(u - x, v - y))
+        peak = max(peak, a.pose.dizzy)
+    return a, peak
+
+
+def check_shakes(window):
+    # Irregularly spaced observations from continuous paths in logical pixels.
+    def wave(t):
+        return 66 * math.sin(11 * t + .12 * math.sin(4 * t))
+    for path in (lambda t: (55*t, 12*t), lambda t: (1600*t, 110*t),
+                 lambda t: (1000 * min(t, .65, max(0, 1.3-t)), 0),
+                 lambda t: (7*math.sin(33*t), 5*math.cos(23*t)),
+                 lambda t: ((1900 if t > 1 else 0) + 35*t, 0)):
+        assert trace_while_lifted(path)[1] == 0
+
+    for path in (lambda t: (wave(t), 0), lambda t: (0, wave(t)),
+                 lambda t: (.75*wave(t), -.65*wave(t)),
+                 lambda t: (70*math.cos(10*t), 56*math.sin(10*t))):
+        for rate in (12, 30, 60):
+            a, peak = trace_while_lifted(path, rate)
+            assert .8 < peak <= 1 and all(p.goal == 'lift' for p in a.paws)
+            for i in range(210):
+                a.advance(1/30, 3.2+(i+1)/30)
+            assert a.pose.dizzy < .005 and abs(a.pose.sway_x) + abs(a.pose.sway_y) < .002
+
+    # Input, geometry and rendering on the very first frame after release.
+    shaken, _ = trace_while_lifted(lambda t: (wave(t), 0))
+    intensity = shaken.pose.dizzy
+    shaken.put_down(3.2)
+    p = shaken.advance(1/30, 3.24)
+    assert .8 < p.dizzy <= intensity and all(paw.goal == 'brace' for paw in shaken.paws)
+    assert painted(window, p) != painted(window, replace(p, dizzy=0))
+    last = p.dizzy
+    for i in range(1, 140):
+        p = shaken.advance(1/30, 3.24+i/30)
+        assert 0 <= p.dizzy <= last
+        last = p.dizzy
+    assert last == 0
+
+    t = 3.24
+    key = Activity(keyboard=t, pulses=frozenset({'A'}), latest=KeyHint('A', t), new_presses=1)
+    held = Activity(keyboard=3., held=frozenset({'P'}), latest=KeyHint('S', 3.1))
+    for activity in (key, held, Activity(mouse=t, motion_x=14), Activity(scroll=t, scroll_x=-1),
+                     Activity(scroll=t, scroll_y=1), replace(key, mouse=t, motion_y=12)):
+        a, _ = trace_while_lifted(lambda t: (wave(t), 0))
+        a.advance(.005, 3.205, held)
+        assert a.pose.pressed == {'P'} and all(p.goal == 'lift' for p in a.paws)
+        a.put_down(3.21)
+        p = a.advance(1/30, t, activity)
+        assert p.dizzy == 0 and not a.release_dizzy and not p.contacts
+        goals = {paw.goal for paw in a.paws}
+        assert 'lift' not in goals and 'S' not in goals
+        if activity.pressed:
+            assert activity.pressed <= goals and p.pressed == activity.pressed
+            assert painted(window, p) != painted(window, replace(p, pressed=frozenset()))
+        if activity.motion_x or activity.motion_y or activity.scroll_x or activity.scroll_y:
+            assert a.paws[0].goal == 'mouse'
+        if activity.scroll_x or activity.scroll_y:
+            assert p.scroll and p.scroll_direction == math.copysign(1, activity.scroll_y or activity.scroll_x)
+        assert a.advance(.033, t+.6).dizzy == 0
+
+    a, _ = trace_while_lifted(lambda t: (wave(t), 0))
+    a.put_down(3.2)
+    for i in range(24):
+        now = 3.22 + i / 15
+        letter = ('F', 'J', 'D', 'K')[i % 4]
+        p = a.advance(1/15, now, Activity(keyboard=now, latest=KeyHint(letter, now), key_interval=1/15,
+                                          new_presses=1, pulses=frozenset({letter})))
+        assert p.pressed == {letter} and letter in (p.left_key, p.right_key) and not p.dizzy
+    for i in range(25):
+        p = a.advance(1/30, now + (i+1)/30)
+        assert not p.pressed and not p.dizzy
+    assert p.left_key is p.right_key is None
+
+    for interaction in ('pet', 'ear-left', 'ear-right', 'tail', 'lift', 'resume'):
+        a, _ = trace_while_lifted(lambda t: (wave(t), 0))
+        a.put_down(3.2)
+        if interaction == 'pet':
+            a.pet(.5, held=True)
+        elif interaction == 'lift':
+            a.lift(3.22)
+        elif interaction == 'resume':
+            a.interact()  # Wayland's general resume carries no physical targets.
+        else:
+            a.touch(interaction)
+        pose = a.advance(1/30, 3.25)
+        assert not pose.dizzy and not pose.pressed and not pose.contacts
+
+    # A new screen or scale supplies a new origin. No excursion spans screens.
+    window.animations = Animations(window.keyboard)
+    window.set_paused(False)
+    window.dragging = True
+    window.begin_drag_motion()
+    for _ in range(5):
+        window.drag_space = (window.screen(), 2.5, window.width())
+        window.drag_sample = window.pos() + QPoint(1300, -800)
+        window.sample_drag(time.monotonic())
+        window.tick()
+    assert not window.animations.pose.dizzy and not window.animations.pose.sway_x
+    window.finish_drag()
+
+
 if __name__ == '__main__':
     with TemporaryDirectory(prefix='miga-touch-') as directory:
         app = QApplication([])
@@ -274,5 +393,6 @@ if __name__ == '__main__':
         window.show()
         check_touch(window)
         check_drag(window)
+        check_shakes(window)
         window.shutdown()
-    print('PASS: painted regions at three sizes, sleeping touches, held pats, curiosity, measured drag, immediate release input and pause.')
+    print('PASS: anatomical touch, drag inertia, shake discrimination, interruptible recovery, held keys and pause.')

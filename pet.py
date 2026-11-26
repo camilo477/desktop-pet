@@ -105,6 +105,7 @@ class PetWindow(QWidget):
         self.native_anchor = None
         self.native_motion_time = None
         self.drag_sample = None
+        self.drag_space = None
         self.frame = QPixmap()
         self.last_mask = QRegion()
         self.mask_time = 0.0
@@ -161,7 +162,7 @@ class PetWindow(QWidget):
                                 [screen.availableGeometry() for screen in QApplication.screens()])
 
     def ensure_visible(self) -> None:
-        if not self.native_wayland and not self._closed:
+        if not self.native_wayland and not self._closed and not self.dragging:
             self.move(self.clamp_position(self.pos()))
 
     def watch_screen(self, screen) -> None:
@@ -225,15 +226,9 @@ class PetWindow(QWidget):
         if cursor_point is not None:
             offset = cursor_point - self.art.head_position
             offset = (offset.x(), offset.y())
-        delta = (0, 0)
         if self.drag_sample is not None:
-            position = self.pos()
-            motion = position - self.drag_sample
-            delta = (motion.x(), motion.y())
-            if self.system_drag and not motion.isNull():
-                self.native_motion_time = now
-            self.drag_sample = position
-        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze, offset, delta,
+            self.sample_drag(now)
+        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze, offset,
                                 desktop_idle=self.wayland.idle(now) if self.wayland else None)
         interval = 100 if self.animations.sleeping else 34
         if self.timer.interval() != interval:
@@ -368,8 +363,7 @@ class PetWindow(QWidget):
             self.dragging = True
             self.activity.set_dragging(True)
             if not self.paused:
-                self.animations.lift()
-                self.drag_sample = self.pos()
+                self.begin_drag_motion()
             if self.native_wayland and self.windowHandle():
                 self.native_anchor = event.position().toPoint()
                 self.native_motion_time = time.monotonic()
@@ -380,6 +374,31 @@ class PetWindow(QWidget):
                     self.position_timer.start()
         if self.dragging and not self.system_drag and not self.native_wayland:
             self.move(self.press_origin + delta)
+
+    def begin_drag_motion(self):
+        self.animations.lift(time.monotonic())
+        self.drag_sample = self.pos()
+        self.drag_space = (self.screen(), self.devicePixelRatioF(), self.width())
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if getattr(self, 'drag_sample', None) is not None:
+            self.sample_drag(time.monotonic())
+
+    def sample_drag(self, now):
+        # Move events preserve turns between paints. A tick can also observe a
+        # compositor position update. Both consume the same logical origin.
+        position = self.pos()
+        motion = position - self.drag_sample
+        space = (self.screen(), self.devicePixelRatioF(), self.width())
+        if space != self.drag_space:
+            self.animations.drag.rebase(now)
+            self.drag_space = space
+        elif not motion.isNull():
+            self.animations.drag.observe(motion.x(), motion.y(), now)
+            if self.system_drag:
+                self.native_motion_time = now
+        self.drag_sample = position
 
     def wheelEvent(self, event) -> None:
         if not self.activity.global_pointer_active:
@@ -427,15 +446,16 @@ class PetWindow(QWidget):
         self.position_timer.stop()
         moved = self.dragging
         if moved:
-            self.activity.set_dragging(False)
+            released_at = self.activity.set_dragging(False)
             if self.windows_input and self.windows_input.active:
                 self.windows_input.sync_cursor()
             if self.mac_input and self.activity.native_pointer:
                 self.mac_input.sync_pointer()
             self.local_pointer = None
             if self.animations.carried:
-                self.animations.put_down(time.monotonic())
+                self.animations.put_down(released_at)
         self.drag_sample = None
+        self.drag_space = None
         self.press_position = None
         self.press_origin = QPoint()
         self.press_region = None
@@ -486,7 +506,11 @@ class PetWindow(QWidget):
             self.local_pointer = None
             if self.animations.pet_held:
                 self.animations.release_pet()
-            self.drag_sample = None
+            if self.animations.carried:
+                self.animations.put_down(time.monotonic())
+            self.drag_sample = self.drag_space = None
+        elif self.dragging and not self.animations.carried:
+            self.begin_drag_motion()
         self.refresh_activity()
         self.save_preferences()
 

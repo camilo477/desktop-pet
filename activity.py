@@ -89,6 +89,7 @@ class ActivityMonitor:
         self._new_presses = 0
         self._pointer_distance = self._wheel_distance = 0.0
         self._dragging = False
+        self._drop_grace_until = -math.inf
         self._wake_callback = wake_callback
         self._notice_pending = False
         self._context_click = False
@@ -229,10 +230,18 @@ class ActivityMonitor:
         # Keep each listener's last coordinate current while the window moves.
         # The next genuine movement then starts at the release position.
         with self._lock:
+            now = time.monotonic()
+            if self._dragging and not dragging:
+                self._drop_grace_until = now + RELEASE_GRACE
+                self._pulses.clear()
+                self._wheel[:] = (0., 0.)
+                self._wheel_distance = 0.
+                self._activity = replace(self._activity, scroll=-math.inf, click=-math.inf)
             self._dragging = dragging
             self._motion[:] = (0.0, 0.0)
             self._pointer_distance = 0.0
             self._activity = replace(self._activity, mouse=-math.inf)
+            return now
 
     def discard_menu_pointer(self):
         # Navigating Miga's own popup while asleep is an explicit control. Retain
@@ -251,6 +260,7 @@ class ActivityMonitor:
                 self._notify()
 
     def _clear_keys(self):
+        self._drop_grace_until = -math.inf
         self._down.clear(); self._releases.clear(); self._pulses.clear()
         self._hints = [KeyHint(), KeyHint()]; self._latest = KeyHint()
 
@@ -294,9 +304,15 @@ class ActivityMonitor:
             self._hints = [hint if now - hint.stamp < HINT_SECONDS else KeyHint() for hint in self._hints]
             if now - self._latest.stamp >= HINT_SECONDS:
                 self._latest = KeyHint()
-            result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key in self.keyboard.by_id),
+            down = self._down
+            if self._releases and now < self._drop_grace_until:
+                # X11 still needs the pending release to recognize autorepeat.
+                # Only the animation filters keys already released before drop.
+                down = {code: key for code, key in down.items()
+                        if code not in self._releases or self._releases[code][0] > self._drop_grace_until}
+            result = replace(self._activity, held=frozenset(key for key, _ in down.values() if key in self.keyboard.by_id),
                            pulses=frozenset(self._pulses), hints=tuple(self._hints), latest=self._latest,
-                           any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1],
+                           any_held=bool(down), motion_x=self._motion[0], motion_y=self._motion[1],
                            scroll_x=self._wheel[0], scroll_y=self._wheel[1],
                            new_presses=self._new_presses, pointer_distance=self._pointer_distance,
                            wheel_distance=self._wheel_distance)
