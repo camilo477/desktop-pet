@@ -15,6 +15,7 @@ import objc
 from Quartz import CoreGraphics as CG
 from PySide6.QtCore import QEventLoop, QSettings, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QWidget
+from appearance import Appearance
 from macos_input import current_layout
 from pet import PetWindow
 
@@ -55,9 +56,15 @@ def desktop_checks(w):
         screen = window.convertPointToScreen_(point)
         return AppKit.NSWindow.windowNumberAtPoint_belowWindowWithWindowNumber_(screen, 0)
 
-    head = w.art.head_position
-    assert hit(head.x(), head.y()) == window.windowNumber(), 'Opaque head must receive hits'
-    assert hit(2, 2) == behind.windowNumber(), 'Transparent corner must expose the window below'
+    for size, coat, form in ((150, 'white', '60'), (300, 'calico', '75'), (200, 'original', '100')):
+        w.set_size(size)
+        w.configure_appearance(Appearance(coat))
+        w.configure_keyboard(form=form)
+        w.move(85, 90)
+        wait(80)
+        head = w.art.head_position * (size / 200)
+        assert hit(head.x(), head.y()) == window.windowNumber(), 'Opaque head must receive hits'
+        assert hit(2, 2) == behind.windowNumber(), 'Transparent corner must expose the window below'
     if (os.environ.get('GITHUB_ACTIONS') == 'true' and w.mac_input.status == 'active'
             and CG.CGPreflightPostEventAccess()):
         app = AppKit.NSApplication.sharedApplication()

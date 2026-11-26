@@ -411,7 +411,7 @@ class PetWindow(QWidget):
             if self.windows_input and self.windows_input.active:
                 self.windows_input.sync_cursor()
             if self.mac_input and self.activity.native_pointer:
-                self.mac_input.end_drag()
+                self.mac_input.sync_pointer()
             self.local_pointer = None
             if self.animations.carried:
                 self.animations.put_down(time.monotonic())

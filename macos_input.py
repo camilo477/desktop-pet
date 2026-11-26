@@ -131,6 +131,7 @@ class MacInput:
         CF.CFRunLoopAddSource(CF.CFRunLoopGetMain(), source, CF.kCFRunLoopCommonModes)
         CG.CGEventTapEnable(tap, True)
         self.monitor.native_pointer = True
+        self.sync_pointer()
         return True
 
     @staticmethod
@@ -218,7 +219,7 @@ class MacInput:
             self.monitor.pointer_scrolled(*wheel_units(FIELD(event, x), FIELD(event, y), continuous))
         return event
 
-    def end_drag(self):
+    def sync_pointer(self):
         self.motion_after = time.monotonic_ns()
         self.monitor.reset_pointer_origin()
         point = QCursor.pos()
