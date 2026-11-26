@@ -350,6 +350,8 @@ class PetWindow(QWidget):
     def mouseMoveEvent(self, event) -> None:
         if self.system_drag and not event.buttons() & Qt.MouseButton.LeftButton:
             self.finish_drag()
+        elif self.system_drag:
+            self.native_motion_time = time.monotonic()
         position = event.globalPosition()
         self.activity.pointer_moved(position.x(), position.y(), local=True)
         if not self.paused:
@@ -407,14 +409,13 @@ class PetWindow(QWidget):
             self.finish_drag()
 
     def check_native_release(self) -> None:
-        # Qt can clear its button state as the compositor takes the grab. Give
-        # re-entry, local motion or a real release time to settle the pose.
-        # Bound only our visual grip if the compositor withholds the final event.
-        if (self.system_drag and self.native_anchor is not None
-                and (not self.last_mask.contains(self.native_anchor)
-                     or (self.native_motion_time is not None
-                         and time.monotonic() - self.native_motion_time >= 6))
-                and not QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+        if not self.system_drag or self.native_anchor is None:
+            return
+        quiet = time.monotonic() - self.native_motion_time if self.native_motion_time is not None else 0.
+        # Qt may clear its button state at handoff, or retain a stale pressed
+        # bit if the compositor consumes release. Expire only our visual grip.
+        released = not QApplication.mouseButtons() & Qt.MouseButton.LeftButton
+        if quiet >= 30 or (released and (quiet >= 6 or not self.last_mask.contains(self.native_anchor))):
             self.finish_drag()
 
     def enterEvent(self, event) -> None:

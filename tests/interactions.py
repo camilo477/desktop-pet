@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+import time
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -252,6 +253,14 @@ def check_drag(window):
         assert window.dragging
         window.enterEvent(QEnterEvent(QPointF(anchor), QPointF(anchor), QPointF(window.mapToGlobal(anchor))))
     assert not window.dragging and window.native_anchor is None
+
+    # A compositor can also withhold release and leave Qt's button bit stale.
+    window.system_drag = window.dragging = True
+    window.native_anchor = anchor
+    window.native_motion_time = time.monotonic() - 31
+    with patch.object(QApplication, 'mouseButtons', return_value=LEFT):
+        window.check_native_release()
+    assert not window.dragging and not window.timer.isActive()
 
 
 if __name__ == '__main__':
