@@ -9,6 +9,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
+from appearance import Appearance, COATS, EYES, NOSES
 from animations import Pose, mix, smoothstep
 from anatomy import BodyGeometry, FaceGeometry
 from keyboard_layout import Keyboard, KEYBOARD_SCALE, KEY_TRAVEL
@@ -46,7 +47,7 @@ def cubic_points(node):
 
 
 class CatArt:
-    def __init__(self, keyboard=None):
+    def __init__(self, keyboard=None, appearance=Appearance()):
         path = Path(__file__).resolve().parent / 'assets' / 'cat' / 'miga.svg'
         self.renderer = QSvgRenderer(str(path))
         if not self.renderer.isValid():
@@ -75,20 +76,46 @@ class CatArt:
         self.keyboard = QPixmap()
         self.sleep_face = None
         self.set_keyboard(keyboard or Keyboard())
-        # SVG colors are shared by cached artwork and procedural surfaces.
-        self.fur = QColor(elements['body'].get('fill'))
-        self.head_fur = QColor(elements['head-shape'].get('fill'))
-        self.tail_fur = QColor(elements['tail'].get('fill'))
-        self.foreleg = QColor(elements['front-legs'].get('fill'))
-        self.iris = QColor(elements['eyes'].get('fill'))
-        self.pupil = QColor(elements['pupils'].get('fill'))
-        self.whisker = QColor(elements['whiskers'].get('stroke'))
-        self.ear_inner = QColor(elements['ear-inner-left'].get('fill'))
-        self.face_tone = QColor(elements['face-volume'].get('fill'))
-        self.lid_color = QColor(elements['closed-eyes'].get('stroke'))
-        self.body_tones = {name: QColor(elements[name].get('fill')) for name in BODY_TONES}
+        self.original = {key: QColor(elements[key].get('fill')) for key in
+                         ('body', 'head-shape', 'tail', 'front-legs', 'eyes', 'pupils',
+                          'ear-inner-left', 'face-volume', *BODY_TONES)}
+        self.original['whiskers'] = QColor(elements['whiskers'].get('stroke'))
+        self.original['closed-eyes'] = QColor(elements['closed-eyes'].get('stroke'))
+        self.appearance = None
+        self.set_appearance(appearance)
         font = QFont('sans-serif'); font.setPixelSize(9); font.setWeight(QFont.Weight.DemiBold)
         self.z_path = QPainterPath(); self.z_path.addText(QPointF(0, 0), font, 'Z')
+
+    def set_appearance(self, appearance):
+        if appearance == self.appearance:
+            return
+        coat = COATS[appearance.coat]
+        if self.appearance is None or appearance.coat != self.appearance.coat:
+            def color(swatch, element):
+                return QColor(swatch) if swatch else self.original[element]
+
+            self.fur = color(coat.base, 'body')
+            self.head_fur = color(coat.base, 'head-shape')
+            self.tail_fur = color(coat.tail or coat.light, 'tail')
+            self.foreleg = color(coat.leg, 'front-legs')
+            self.ears = tuple(map(QColor, coat.ears)) or (self.head_fur, self.head_fur)
+            self.ear_inner = color(coat.inner, 'ear-inner-left')
+            self.face_tone = color(coat.light, 'face-volume')
+            self.whisker = color(coat.whisker, 'whiskers')
+            self.lid_color = color(coat.lid, 'closed-eyes')
+            self.pupil = self.original['pupils']
+            self.body_tones = {k: color(c, k) for k, c in zip(BODY_TONES,
+                               (coat.shade, coat.light, coat.light, coat.shade))}
+            self.coat_layers_dirty = True
+        eye = coat.eyes if appearance.eyes == 'auto' else appearance.eyes
+        eye_pair = ('blue', 'green') if eye == 'odd' else (eye, eye)
+        self.irises = tuple(self.original['eyes'] if key == 'gold' else QColor(EYES[key][1])
+                            for key in eye_pair)
+        self.iris = self.irises[0]
+        nose = NOSES[appearance.nose][1] or coat.nose
+        self.nose = QColor(nose) if nose else self.pupil
+        self.appearance = appearance
+        self.sleep_face = None
 
     def set_keyboard(self, keyboard):
         self.model = keyboard
@@ -102,20 +129,23 @@ class CatArt:
         if self.keyboard_cache != (scale, self.model.layout):
             self._cache_keyboard(scale)
             self.keyboard_cache = (scale, self.model.layout)
-        if scale == self.cache_scale:
+        resized = scale != self.cache_scale
+        if resized:
+            self.cache_scale = scale
+            self._cache_layer('mouse', scale)
+        if resized or self.coat_layers_dirty:
+            coat = COATS[self.appearance.coat]
+            toes = coat.toes or (coat.leg, coat.leg)
+            feet = coat.feet or (coat.shade, coat.shade)
+            self._cache_layer('paw', scale, toes[:1])
+            if toes[0] == toes[1]:
+                self.layers['paw-right'] = self.layers['paw']
+            else:
+                self._cache_layer('paw', scale, toes[1:], 'paw-right')
+            self._cache_layer('hind-feet', scale, feet)
+            self.coat_layers_dirty = False
+        if not resized and self.sleep_face is not None:
             return
-        self.cache_scale = scale
-        for name in ('mouse', 'paw', 'hind-feet'):
-            bounds = self.renderer.boundsOnElement(name)
-            left, top = math.floor((bounds.left() - 1) * scale), math.floor((bounds.top() - 1) * scale)
-            width = math.ceil((bounds.right() + 1) * scale) - left
-            height = math.ceil((bounds.bottom() + 1) * scale) - top
-            origin = QPointF(left / scale, top / scale)
-            image = QPixmap(width, height); image.fill(Qt.GlobalColor.transparent)
-            p = QPainter(image); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            p.scale(scale, scale); p.translate(-origin.x(), -origin.y())
-            self.renderer.render(p, name, bounds); p.end(); image.setDevicePixelRatio(scale)
-            self.layers[name] = origin, image
         self.sleep_face = None
         image = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
         image.fill(Qt.GlobalColor.transparent)
@@ -123,6 +153,29 @@ class CatArt:
         resting = Pose(sleep=1, relax=1, blink=1, expression=DROWSY)
         self._head(p, resting, BodyGeometry(resting)); p.end(); image.setDevicePixelRatio(scale)
         self.sleep_face = image, self.head_position, self.head_hit_paths[:]
+
+    def _cache_layer(self, name, scale, colors=(), target=None):
+        bounds = self.renderer.boundsOnElement(name)
+        left, top = math.floor((bounds.left() - 1) * scale), math.floor((bounds.top() - 1) * scale)
+        width = math.ceil((bounds.right() + 1) * scale) - left
+        height = math.ceil((bounds.bottom() + 1) * scale) - top
+        origin = QPointF(left / scale, top / scale)
+        image = QPixmap(width, height); image.fill(Qt.GlobalColor.transparent)
+        p = QPainter(image); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.scale(scale, scale); p.translate(-origin.x(), -origin.y())
+        self.renderer.render(p, name, bounds)
+        if colors and colors[0]:
+            # Tint the SVG's existing coverage, including the antialiased toe edges.
+            p.resetTransform()
+            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            if len(colors) == 2 and colors[0] != colors[1]:
+                half = width // 2
+                p.fillRect(0, 0, half, height, QColor(colors[0]))
+                p.fillRect(half, 0, width - half, height, QColor(colors[1]))
+            else:
+                p.fillRect(image.rect(), QColor(colors[0]))
+        p.end(); image.setDevicePixelRatio(scale)
+        self.layers[target or name] = origin, image
 
     def _cache_keyboard(self, scale):
         self.keyboard = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
@@ -280,7 +333,7 @@ class CatArt:
         for side, name in ((-1, 'ear-left'), (1, 'ear-right')):
             ear_point = face.ear_projection(side)
             path = curve([ear_point(x, y) for x, y in self.shapes[name]])
-            p.setBrush(self.head_fur); p.drawPath(path)
+            p.setBrush(self.ears[int(side > 0)]); p.drawPath(path)
             self.head_hit_paths.append(path)
             inner = self.shapes['ear-inner-left' if side < 0 else 'ear-inner-right']
             p.save(); p.setClipPath(path); p.setBrush(self.ear_inner)
@@ -305,7 +358,7 @@ class CatArt:
                               face.point(ex + width * .65, ey + top - slope), right,
                               face.point(ex + width * .65, ey + bottom - slope * .3),
                               face.point(ex - width * .65, ey + bottom + slope * .3), left])
-            p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.iris); p.drawPath(aperture)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.irises[int(side > 0)]); p.drawPath(aperture)
             p.save(); p.setClipPath(aperture, Qt.ClipOperation.IntersectClip)
             px = ex + (pose.gaze_x - pose.head_x * .35) * 2.5
             py = ey + pose.gaze_y * 2.0
@@ -321,9 +374,10 @@ class CatArt:
                 lid.cubicTo(*face.point(ex - width * .65, ey + 1.1),
                             *face.point(ex + width * .65, ey + 1.1), *face.point(ex + width, ey))
                 p.setPen(QPen(self.lid_color, .65)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPath(lid)
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.pupil)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.nose)
         p.drawPath(polygon([face.point(-1.2, 10), face.point(1.2, 10), face.point(0, 11.3)]))
         if pose.yawn > .03 or pose.tongue > .03:
+            p.setBrush(self.pupil)
             mouth = []
             for i in range(16):
                 angle = i * math.tau / 16
@@ -404,5 +458,5 @@ class CatArt:
             transform.translate(-reach, mix(-3.5, 0, reach))
             self.hits.append(('paw', transform.map(self.paw_path)))
             p.save(); p.setTransform(transform, True)
-            self.layer(p, 'paw'); p.restore()
+            self.layer(p, 'paw' if side < 0 else 'paw-right'); p.restore()
         self._zzz(p, pose); p.restore()
