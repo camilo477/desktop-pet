@@ -12,7 +12,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from appearance import Appearance
@@ -20,12 +20,61 @@ from pet import PetWindow
 from windows_input import Device, Key, Mouse, foreground, function, user
 
 
+def exercise_raw_delivery(app, pet, target):
+    """Send one controlled modifier gesture to our own foreground test window."""
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        return
+    from PySide6.QtTest import QTest
+
+    class KeyboardInput(C.Structure):
+        _fields_ = [('vk', W.WORD), ('scan', W.WORD), ('flags', W.DWORD),
+                    ('time', W.DWORD), ('extra', C.c_size_t)]
+
+    class InputData(C.Union):
+        # INPUT has a 32-byte MOUSEINPUT union member on x64.
+        _fields_ = [('key', KeyboardInput), ('padding', C.c_byte * 32)]
+
+    class Input(C.Structure):
+        _fields_ = [('kind', W.DWORD), ('data', InputData)]
+
+    send = function(user, 'SendInput', W.UINT, W.UINT, C.POINTER(Input), C.c_int)
+    press = Input(1, InputData(key=KeyboardInput(scan=0x2a, flags=8)))
+    release = Input(1, InputData(key=KeyboardInput(scan=0x2a, flags=10)))
+    pet.timer.stop()
+    app.processEvents()
+    pet.activity.snapshot()
+    assert foreground() == int(target.winId())
+    with QSignalBlocker(pet):
+        gesture = (Input * 3)(press, press, release)
+        assert send(3, gesture, C.sizeof(Input)) == 3
+        QTest.qWait(65)
+        activity = pet.activity.snapshot()
+    pet.timer.start()
+    assert foreground() == int(target.winId())
+    assert activity.new_presses == 1 and 'ShiftLeft' in activity.pressed
+    assert not activity.any_held and target.presses and target.releases
+    print('PASS: Win32 delivered synthetic make/repeat/break to Raw Input and the foreground widget.')
+
+
 def hit_tests(app):
     from PySide6.QtTest import QTest
-    background = QWidget()
+    class Target(QWidget):
+        presses = releases = 0
+
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key.Key_Shift:
+                self.presses += 1
+
+        def keyReleaseEvent(self, event):
+            if event.key() == Qt.Key.Key_Shift:
+                self.releases += 1
+
+    background = Target()
+    background.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     background.setGeometry(25, 25, 400, 380)
     background.show()
     background.activateWindow()
+    background.setFocus()
     QTest.qWait(120)
     before = foreground()
     pet = PetWindow()
@@ -48,6 +97,8 @@ def hit_tests(app):
         assert to_screen(hwnd, C.byref(point))
         return hit(point)
 
+    if '--dpi' not in sys.argv:
+        exercise_raw_delivery(app, pet, background)
     for form, coat, paused in (('100', 'original', False), ('60', 'calico', True)):
         pet.configure_keyboard(form=form)
         pet.configure_appearance(Appearance(coat, 'auto', 'auto'))
