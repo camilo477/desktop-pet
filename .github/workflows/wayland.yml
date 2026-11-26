@@ -16,15 +16,20 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt -r requirements-wayland.txt
-          .venv/bin/python tests/wayland.py
       - name: Extract KWin in the runner's temporary directory
         run: |
           stage="$RUNNER_TEMP/kwin"
           mkdir -p "$stage"/{lists/partial,archives/partial,root,apt.conf.d}
           opts=(-o Debug::NoLocking=true -o Dir::State::lists="$stage/lists" -o Dir::Cache::archives="$stage/archives" -o Dir::Etc::parts="$stage/apt.conf.d")
           apt-get "${opts[@]}" update -qq
-          apt-get "${opts[@]}" --no-install-recommends --download-only -y install kwin-wayland qt6-wayland
+          apt-get "${opts[@]}" --no-install-recommends --download-only -y install kwin-wayland qt6-wayland libegl1 libegl-mesa0 libgl1-mesa-dri
           for deb in "$stage"/archives/*.deb; do dpkg-deb -x "$deb" "$stage/root"; done
+          mkdir "$stage/native"
+          for lib in "$stage/root/usr/lib/x86_64-linux-gnu/"*.so*; do
+            case "$(basename "$lib")" in libQt6*) continue;; esac
+            ln -s "$lib" "$stage/native/"
+          done
+          LD_LIBRARY_PATH="$stage/native" .venv/bin/python tests/wayland.py
       - name: Exercise a private KWin session
         run: |
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/miga-runtime" XDG_CONFIG_HOME="$RUNNER_TEMP/miga-config"
@@ -45,5 +50,5 @@ jobs:
               test -S "$XDG_RUNTIME_DIR/miga-ci" && break
               sleep .2
             done
-            QT_QPA_PLATFORM=wayland .venv/bin/python tests/kwin.py
+            LD_LIBRARY_PATH="$RUNNER_TEMP/kwin/native" QT_QPA_PLATFORM=wayland .venv/bin/python tests/kwin.py
           '
