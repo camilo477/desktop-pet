@@ -174,11 +174,19 @@ away. Moving the pointer close to its face briefly draws its attention.
 
 To pick Miga up, hold the left button on its silhouette or peripherals and move
 past the desktop's normal drag distance. This also works halfway through a pat.
-The keyboard and mouse move with the window. Miga tucks its forepaws, leans
-against the motion and settles when you stop. Real keys still light up during
-the drag. On release, the paws can type, reach the mouse or scroll immediately
-while the body regains its balance. The next pointer movement starts from the
-release position. Empty areas allow clicks through where supported.
+The keyboard and mouse move with the window. Miga tucks its forepaws and
+leans against acceleration, then rocks back slightly as the window brakes.
+Its head and tail follow with a short delay. Moving quickly in a straight line
+keeps its gaze steady. Repeated brisk reversals or tight circles
+can make its gaze wander and its ears tip sideways while it is still lifted.
+On release, Miga braces its paws and regains its seated balance over about
+one to four seconds, depending on the shaking.
+
+Real keys light up during the drag. A held key, new typing, pointer motion or
+scroll takes priority on the first frame after release. Petting or picking
+Miga up again also interrupts recovery. On Wayland, shake detection needs
+actual window displacement from the compositor. When positions are hidden,
+the pet keeps its suspended pose. Empty areas pass clicks where supported.
 
 The right-click menu offers **Tamaño** (150, 200 or 300
 logical pixels), **Teclado**, **Apariencia**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
