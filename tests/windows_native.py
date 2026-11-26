@@ -12,16 +12,18 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QSettings, QSignalBlocker, Qt
+from PySide6.QtCore import QPoint, QSettings, QSignalBlocker, Qt
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QWidget
 
 from appearance import Appearance
 from pet import PetWindow
-from windows_input import Device, Key, Mouse, foreground, function, user
+from windows_input import Device, Key, Mouse, foreground, function, keyboard_layout, user
+from windows_keyboard import foreign_layout
 
 
 def exercise_raw_delivery(app, pet, target):
-    """Send one controlled modifier gesture to our own foreground test window."""
+    """Drive only the disposable runner's foreground test window."""
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         return
     from PySide6.QtTest import QTest
@@ -30,9 +32,12 @@ def exercise_raw_delivery(app, pet, target):
         _fields_ = [('vk', W.WORD), ('scan', W.WORD), ('flags', W.DWORD),
                     ('time', W.DWORD), ('extra', C.c_size_t)]
 
+    class MouseInput(C.Structure):
+        _fields_ = [('x', W.LONG), ('y', W.LONG), ('data', W.DWORD), ('flags', W.DWORD),
+                    ('time', W.DWORD), ('extra', C.c_size_t)]
+
     class InputData(C.Union):
-        # INPUT has a 32-byte MOUSEINPUT union member on x64.
-        _fields_ = [('key', KeyboardInput), ('padding', C.c_byte * 32)]
+        _fields_ = [('key', KeyboardInput), ('mouse', MouseInput)]
 
     class Input(C.Structure):
         _fields_ = [('kind', W.DWORD), ('data', InputData)]
@@ -40,20 +45,45 @@ def exercise_raw_delivery(app, pet, target):
     send = function(user, 'SendInput', W.UINT, W.UINT, C.POINTER(Input), C.c_int)
     press = Input(1, InputData(key=KeyboardInput(scan=0x2a, flags=8)))
     release = Input(1, InputData(key=KeyboardInput(scan=0x2a, flags=10)))
+    assert foreground() == int(target.winId())
+    QCursor.setPos(target.mapToGlobal(QPoint(290, 190)))
+    QTest.qWait(75)
+    move = Input(0, InputData(mouse=MouseInput(x=10, y=-6, flags=1)))
+    vertical = Input(0, InputData(mouse=MouseInput(data=120, flags=0x800)))
+    horizontal = Input(0, InputData(mouse=MouseInput(data=-120, flags=0x1000)))
     pet.timer.stop()
     app.processEvents()
     pet.activity.snapshot()
     assert foreground() == int(target.winId())
     with QSignalBlocker(pet):
-        gesture = (Input * 3)(press, press, release)
-        assert send(3, gesture, C.sizeof(Input)) == 3
+        gesture = (Input * 6)(press, press, move, vertical, horizontal, release)
+        assert send(len(gesture), gesture, C.sizeof(Input)) == len(gesture)
         QTest.qWait(65)
         activity = pet.activity.snapshot()
     pet.timer.start()
     assert foreground() == int(target.winId())
     assert activity.new_presses == 1 and 'ShiftLeft' in activity.pressed
     assert not activity.any_held and target.presses and target.releases
-    print('PASS: Win32 delivered synthetic make/repeat/break to Raw Input and the foreground widget.')
+    assert activity.motion_x > 0 and activity.motion_y < 0
+    assert activity.scroll_x == -1 and activity.scroll_y == 1
+    print('PASS: native keyboard make/repeat/break, mouse travel, both wheels and foreground delivery.')
+
+    # Switch only this disposable Windows session and restore its initial HKL.
+    load = function(user, 'LoadKeyboardLayoutW', W.HANDLE, W.LPCWSTR, W.UINT)
+    activate = function(user, 'ActivateKeyboardLayout', W.HANDLE, W.HANDLE, W.UINT)
+    previous = keyboard_layout(0)
+    try:
+        for klid, expected in (('00000407', 'de'), ('00010409', 'dvorak'), ('00000409', 'us')):
+            handle = load(klid, 1)
+            assert handle and foreground() == int(target.winId())
+            backend = pet.windows_input
+            backend.next_layout = 0
+            pet.tick()
+            assert pet.detected_layout == expected and pet.keyboard.layout == expected
+            assert foreign_layout(handle, backend.layout_ids) == expected
+    finally:
+        activate(previous, 0)
+    print('PASS: live German, Dvorak and US layouts with native foreground HKLs.')
 
 
 def hit_tests(app):
