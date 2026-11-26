@@ -41,7 +41,8 @@ jobs:
             libs="$stage/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
             export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=miga-ci
             export XDG_DATA_DIRS="$stage/share:/usr/local/share:/usr/share"
-            LD_LIBRARY_PATH="$libs" QT_PLUGIN_PATH="$libs/qt6/plugins" QML_IMPORT_PATH="$libs/qt6/qml" \
+            libdirs=$(find "$libs" -name "lib*.so*" -printf "%h\n" | sort -u | paste -sd: -)
+            LD_LIBRARY_PATH="$libdirs" QT_PLUGIN_PATH="$libs/qt6/plugins" QML_IMPORT_PATH="$libs/qt6/qml" \
               "$stage/bin/kwin_wayland" --virtual --socket miga-ci --width 1000 --height 700 >"$RUNNER_TEMP/kwin.log" 2>&1 &
             pid=$!
             trap "kill $pid 2>/dev/null || true" EXIT
