@@ -18,7 +18,7 @@ jobs:
       - name: Install for the runner user
         working-directory: Miga prueba
         run: |
-          .\install.ps1
+          .\install.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "$pwd\windows\bin" >> $env:GITHUB_PATH
       - name: Exercise the native Qt window, Raw Input and launchers
@@ -42,8 +42,8 @@ jobs:
       - name: Check reinstall and uninstall
         working-directory: Miga prueba
         run: |
-          .\install.ps1
+          .\install.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\uninstall.ps1
+          .\uninstall.ps1 -Python (Get-Command python.exe).Source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if (Test-Path .venv-win) { throw 'Installation was not removed' }

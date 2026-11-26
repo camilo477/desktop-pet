@@ -65,19 +65,26 @@ def serve(directory, ready_fd=None):
         return 0
     with lock:
         marker = directory / 'endpoint'
-        marker.unlink(missing_ok=True)
         name = 'miga-' + secrets.token_hex(16)
         pending = directory / 'endpoint.tmp'
 
         def ready():
             pending.write_text(name, encoding='ascii')
-            os.replace(pending, marker)
+            # A discovery reader can briefly hold the previous file without
+            # FILE_SHARE_DELETE. Only the lock owner publishes a new generation.
+            deadline = time.monotonic() + 2
+            while True:
+                try:
+                    os.replace(pending, marker)
+                    break
+                except PermissionError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(.015)
 
-        try:
-            return run_pet(name, ready)
-        finally:
-            marker.unlink(missing_ok=True)
-            pending.unlink(missing_ok=True)
+        # Leave the last name in place. It is meaningful only while locked,
+        # and removing it during off races readers on Windows.
+        return run_pet(name, ready)
 
 
 def launch(directory):
@@ -90,7 +97,7 @@ def launch(directory):
     else:
         pythonw = Path(sys.executable).with_name('pythonw.exe')
         command = [str(pythonw), str(Path(__file__).with_name('main.py')), '--run']
-    child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    child = subprocess.Popen(command, cwd=directory, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, close_fds=True,
                              creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
     deadline = time.monotonic() + 15

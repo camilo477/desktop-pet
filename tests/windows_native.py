@@ -63,7 +63,7 @@ def window_checks(app):
 
 
 def benchmark(app):
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QEventLoop, QTimer
     pet = PetWindow()
     pet.set_paused(False)
     pet.set_size(300)
@@ -89,10 +89,9 @@ def benchmark(app):
         if mode == 'typing':
             keys.start(70)
         def run(seconds):
-            until = time.monotonic() + seconds
-            while time.monotonic() < until:
-                app.processEvents()
-                time.sleep(.005)
+            loop = QEventLoop()
+            QTimer.singleShot(seconds * 1000, loop.quit)
+            loop.exec()
         run(1)
         cpu, start = time.process_time(), time.monotonic()
         run(5)
