@@ -293,8 +293,8 @@ class Animations:
             self.mouse_contact = False
         positions = [pose.mouse_dx, pose.mouse_dy]
         moving = active and (activity.motion_x != 0 or activity.motion_y != 0)
-        # Screen deltas stay in screen space; keyboard orientation is unrelated.
-        for axis, (motion, gain, limit) in enumerate(((activity.motion_x, .11, 12), (activity.motion_y, .10, 10))):
+        # Facing us, the cat's right is screen-left. Vertical motion stays in screen space.
+        for axis, (motion, gain, limit) in enumerate(((activity.motion_x, -.11, 12), (activity.motion_y, .10, 10))):
             position = positions[axis]
             target, velocity = self.mouse_target[axis], self.mouse_velocity[axis]
             delta = motion * gain if active else 0
