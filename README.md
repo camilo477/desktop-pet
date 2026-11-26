@@ -1,8 +1,9 @@
 # Miga · Desktop Pet
 
 An original charcoal cat sitting on an invisible floor with a small keyboard
-and mouse. Built for Linux with Python, PySide6 and SVG, Miga accompanies your
-activity in a transparent window without taking keyboard focus.
+and mouse. Miga uses Python, PySide6 and SVG to accompany your activity in a
+transparent desktop window. Linux and Windows share the same cat, keyboard,
+appearances, gestures and animation code.
 
 ## Features
 
@@ -13,7 +14,7 @@ activity in a transparent window without taking keyboard focus.
   Each keycap supplies the target for the paw and the highlight for a press.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
   mouse appears on the viewer's left.
-- Actual key presses, holds and releases on X11, including simultaneous keys.
+- Actual key presses, holds and releases on X11 and Windows, including simultaneous keys.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Typing speed follows actual press cadence and reach distance, with continuous
   redirection instead of queued strokes.
@@ -58,11 +59,11 @@ and clears held keys.
 
 ## Technologies
 
-Python 3, PySide6 (Qt Widgets, Qt SVG, local Qt sockets and QSettings), pynput
-and original SVG artwork. Only PySide6 Essentials is installed; optional Qt
-modules such as WebEngine are not needed.
+Python 3, PySide6 (Qt Widgets, Qt SVG, local IPC and QSettings) and original
+SVG artwork. X11 uses pynput. Windows uses Raw Input through ctypes.
+The application uses PySide6 Essentials.
 
-## Requirements
+## Linux requirements
 
 - Linux with Python 3.10 or newer, pip and support for virtual environments.
 - A graphical desktop with compositing enabled.
@@ -70,7 +71,7 @@ modules such as WebEngine are not needed.
   Some distributions also need Python headers and a C compiler to install
   pynput's transitive dependencies when binary wheels are unavailable.
 
-## Installation
+## Linux installation
 
 ```sh
 git clone https://github.com/camilo477/desktop-pet.git
@@ -94,6 +95,31 @@ export PATH="$HOME/.local/bin:$PATH"
 
 The installer does not change your shell configuration or set up automatic startup.
 
+## Windows installation and status
+
+Miga targets **Windows 11 x64** and **Windows 10 x64, version 1809 or newer**
+with a compatible Qt wheel. The Windows installation pins the Qt family below
+6.13. Install 64-bit Python (3.12 recommended), extract the project to a
+permanent folder, and run this from that folder in PowerShell:
+
+```powershell
+py -3 .\windows\setup.py install
+```
+
+Open **Miga Desktop Pet** in Start, or run `miga` and `miga off` in a new
+PowerShell or CMD window. The installer creates a private virtual environment,
+a Start Menu shortcut and a current-user PATH entry. To uninstall, run
+`py -3 .\windows\setup.py uninstall` from the same folder. Preferences survive.
+A portable folder can also be built on Windows with `windows/build.ps1`.
+[Windows walkthrough and desktop checks (Spanish)](WINDOWS.md) ·
+[Qt platform requirements](https://doc.qt.io/qt-6/windows.html).
+
+Automated tests on Windows Server 2025 x64 cover native input delivery, focus,
+transparent hit targets at five scale factors, concurrent starts, orderly
+shutdown and the portable build. Physical Windows 11/10 desktops, mixed-DPI
+monitor transitions, secure desktops and hardware sleep/resume still need
+hands-on validation. [Windows test runs](https://github.com/camilo477/desktop-pet/actions/workflows/windows.yml).
+
 ## Usage
 
 ```sh
@@ -102,9 +128,9 @@ miga off   # Save preferences and close only this application.
 ```
 
 The command works from any directory. Repeated starts reuse the existing
-instance. A private local socket handles shutdown, with a process lock protecting
-startup and recovery after unexpected exits. No HTTP server or background service
-is installed.
+instance. A user-only Unix socket or Windows named pipe handles ping and
+shutdown. An OS-held lock protects startup and releases on process exit.
+On Windows both the lock and pipe discovery are scoped to the interactive session.
 
 Click Miga's head for a short pat. Hold the left button still on its head for
 about a third of a second to keep petting it. Miga leans into your hand, closes
@@ -200,6 +226,28 @@ holds and releases targets for keys that disappear. Pressing an absent key still
 counts as activity. Firmware can send a function or navigation code without
 revealing the underlying switch or Fn layer, so Miga only reaches identifiable,
 represented positions. Small legends appear as the rendering resolution permits.
+
+## Windows desktop integration
+
+- The window registers for passive Raw Input while reactions are enabled.
+  Make codes and E0/E1 prefixes identify physical positions independently of
+  the key label. Repeats share a held switch. A short reconciliation checks
+  only held switches, and device removal, session changes and power events
+  clear transient input. Windows can restrict input on protected desktops.
+- Pointer movement uses Qt desktop coordinates. Mouse buttons and both wheel
+  axes feed the same animation controller as on X11. Pausing unregisters input.
+- Automatic layout selection checks the foreground thread about once per
+  second. It uses Windows keyboard identifiers, including the built-in
+  Dvorak and Colemak variants. Unidentified variants show the US fallback.
+  All eight layouts can be selected manually. Window titles, application
+  names and typed characters are never queried.
+- Qt supplies a translucent, frameless tool window and per-monitor scaling.
+  Windows uses the painted alpha surface for hit testing. Direct clicks keep
+  the working window active. The context menu can take temporary popup focus.
+  Topmost applies to ordinary desktop windows within the current session.
+
+[Windows layout identifiers](https://learn.microsoft.com/en-us/globalization/windows-keyboard-layouts) ·
+[Win32 layered window hit testing](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
 
 ## Linux compatibility
 
