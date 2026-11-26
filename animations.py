@@ -196,7 +196,7 @@ class Animations:
         for paw in self.paws:
             paw.key = None; paw.stamp = -math.inf; paw.until = -math.inf
             paw.goal = 'cleared'; paw.motion_stamp = -math.inf
-            paw.landed = False; paw.pressure = 0.0
+            paw.landed = False; paw.pressure = 0.0; paw.ready = None
         self.interact()
 
     def start_idle(self, kind):
@@ -233,7 +233,7 @@ class Animations:
             paw.key = key.identifier
             paw.stamp = hint.stamp
             contact = max(.075, min(.18, activity.key_interval * .55))
-            paw.until = max(hint.stamp + contact, now + (.45 if self.pose.sleep > .2 else .04))
+            paw.until = max(hint.stamp + contact, now + .04)
             self.last_hint = max(self.last_hint, hint.stamp)
         assigned = {self.paws[i].key for i in available if self.paws[i].key}
         for index in available:
@@ -342,6 +342,8 @@ class Animations:
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
         pose.sleep = approach(pose.sleep, self.sleep_goal, 2.4 if sleep_target else 12, dt)
+        # The eyelids can open while the slower torso is still uncurling.
+        pose.blink = max(pose.blink, smoothstep((self.sleep_goal - .35) / .65))
         pose.zzz = approach(pose.zzz, smoothstep((pose.sleep - .78) / .22) if sleep_target else 0, 8, dt)
         pose.breath = math.sin(self.time * math.tau / mix(4.2, 6.2, pose.sleep)) * mix(1, .4, pose.sleep)
         if self.sleeping and sleep_target and not active:
@@ -432,16 +434,16 @@ class Animations:
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
             rest = LEFT_REST if index == 0 else RIGHT_REST
-            if pose.sleep > .08 and not active and sleep_target:
-                paw.aim('tuck', (90 if index == 0 else 118, 144))
-            elif playing and self.action_kind in ('lick', 'wash') and index == 0:
-                paw.aim('groom', face.grooming_target(self.action_kind, phase))
-            elif index == MOUSE_PAW and mouse_active:
+            if index == MOUSE_PAW and mouse_active:
                 paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in BY_ID:
                 point = BY_ID[paw.key].contact
                 paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval)
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
+            elif playing and self.action_kind in ('lick', 'wash') and index == 0:
+                paw.aim('groom', face.grooming_target(self.action_kind, phase))
+            elif pose.sleep > .08 and sleep_target:
+                paw.aim('tuck', (90 if index == 0 else 118, 144))
             elif now - activity.keyboard < .70 and paw.ready is not None:
                 paw.aim('ready', paw.ready)
             else:

@@ -47,6 +47,10 @@ class Activity:
     latest: KeyHint = KeyHint()
     any_held: bool = False
     layout: str = 'us'
+    # Unsigned totals since the previous snapshot; repeated keys add no edges.
+    new_presses: int = 0
+    pointer_distance: float = 0.0
+    wheel_distance: float = 0.0
 
     @property
     def pressed(self):
@@ -72,6 +76,8 @@ class ActivityMonitor:
         self._last_press = -math.inf
         self._motion = [0.0, 0.0]
         self._wheel = [0.0, 0.0]
+        self._new_presses = 0
+        self._pointer_distance = self._wheel_distance = 0.0
         self._wake_callback = wake_callback
         self._notice_pending = False
 
@@ -122,7 +128,7 @@ class ActivityMonitor:
                             raise self.StopException()
                         monitor._reader = display.query_keymap
                     for code in self._current_codes(display.query_keymap()):
-                        monitor.key_down(self._identifier(code, 0), code, source=self)
+                        monitor.key_down(self._identifier(code, 0), code, source=self, initial=True)
                     if not self.running:
                         raise self.StopException()
 
@@ -183,7 +189,7 @@ class ActivityMonitor:
             if source is None or source is self._keyboard_listener:
                 self._activity = replace(self._activity, layout=layout)
 
-    def key_down(self, identifier, code=None, server_time=None, source=None):
+    def key_down(self, identifier, code=None, server_time=None, source=None, initial=False):
         if code is None:
             key = BY_ID.get(identifier)
             if key is None:
@@ -201,11 +207,12 @@ class ActivityMonitor:
             pending = self._releases.pop(code, None)
             if code in self._down:
                 # Core X11 repeat produces release/press with the same server time.
-                if pending and server_time is not None and pending[1] is not None and pending[1] != server_time:
-                    self._down.pop(code, None)
-                else:
+                if pending is None or (pending[1] == server_time and
+                                       (server_time is not None or now < pending[0])):
                     return
             self._down[code] = (identifier, now)
+            if not initial:
+                self._new_presses += 1
             if identifier is not None:
                 gap = now - self._last_press
                 interval = .33 if gap > .8 else max(1 / 60, min(.5, gap))
@@ -243,6 +250,7 @@ class ActivityMonitor:
         with self._lock:
             if self.enabled and (dx or dy):
                 self._activity = replace(self._activity, scroll=time.monotonic())
+                self._wheel_distance += abs(dx) + abs(dy)
                 self._wheel[0] = max(-8, min(8, self._wheel[0] + dx))
                 self._wheel[1] = max(-8, min(8, self._wheel[1] + dy))
                 self._notify()
@@ -265,6 +273,7 @@ class ActivityMonitor:
                     and self._listeners[1].is_alive() and self._global_position is not None):
                 return
             dx, dy = x - previous[0], y - previous[1]
+            self._pointer_distance += math.hypot(dx, dy)
             self._motion[0] = max(-240, min(240, self._motion[0] + dx))
             self._motion[1] = max(-240, min(240, self._motion[1] + dy))
             self._activity = replace(self._activity, mouse=time.monotonic())
@@ -309,9 +318,13 @@ class ActivityMonitor:
             result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key),
                            pulses=frozenset(self._pulses), hints=tuple(self._hints), latest=self._latest,
                            any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1],
-                           scroll_x=self._wheel[0], scroll_y=self._wheel[1])
+                           scroll_x=self._wheel[0], scroll_y=self._wheel[1],
+                           new_presses=self._new_presses, pointer_distance=self._pointer_distance,
+                           wheel_distance=self._wheel_distance)
             self._motion[:] = (0.0, 0.0)
             self._wheel[:] = (0.0, 0.0)
+            self._new_presses = 0
+            self._pointer_distance = self._wheel_distance = 0.0
             self._notice_pending = False
             return result
 
@@ -340,5 +353,7 @@ class ActivityMonitor:
             self._last_press = -math.inf
             self._motion[:] = (0.0, 0.0)
             self._wheel[:] = (0.0, 0.0)
+            self._new_presses = 0
+            self._pointer_distance = self._wheel_distance = 0.0
             self._notice_pending = False
         self._stop_listeners()

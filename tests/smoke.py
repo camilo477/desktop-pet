@@ -184,7 +184,7 @@ def check_motion_and_screens() -> None:
     monitor.pointer_moved(101, 100)
     state = monitor.snapshot()
     movement = state.mouse
-    assert state.motion_x == 1 and state.motion_y == 0
+    assert state.motion_x == 1 and state.motion_y == 0 and state.pointer_distance == 1
     monitor.pointer_moved(101, 100)
     monitor.pointer_click()
     assert monitor.snapshot().mouse == movement and monitor.snapshot().click > 0
@@ -192,6 +192,7 @@ def check_motion_and_screens() -> None:
     monitor.pointer_scrolled(0, 1)
     state = monitor.snapshot()
     assert state.scroll > 0 and state.scroll_y == 1 and state.mouse == movement
+    assert state.wheel_distance == 1 and state.pointer_distance == state.new_presses == 0
     assert monitor.snapshot().scroll_y == 0
     scroll = Animations()
     for frame in range(24):
@@ -206,13 +207,17 @@ def check_motion_and_screens() -> None:
     scroll.advance(1 / 30, now_scroll + .51, Activity(scroll=now_scroll))
     assert not scroll.mouse_contact
     monitor.key_down('W', server_time=100)
-    initial = monitor.snapshot().latest
+    state = monitor.snapshot()
+    assert state.new_presses == 1
+    initial = state.latest
     monitor.key_up(BY_ID['W'].scan, server_time=200)
     monitor.key_down('W', server_time=200)
-    assert monitor.snapshot().latest == initial and 'W' in monitor.snapshot().held
+    state = monitor.snapshot()
+    assert state.latest == initial and 'W' in state.held and state.new_presses == 0
     monitor.key_up(BY_ID['W'].scan, server_time=300)
     monitor.key_down('W', server_time=301)
-    assert monitor.snapshot().latest.stamp > initial.stamp
+    state = monitor.snapshot()
+    assert state.latest.stamp > initial.stamp and state.new_presses == 1
     monitor.key_up(BY_ID['W'].scan)
     QTest.qWait(35)
     state = monitor.snapshot()
@@ -228,6 +233,7 @@ def check_motion_and_screens() -> None:
     monitor.key_down('A')
     monitor.set_enabled(False)
     assert not monitor.snapshot().pressed and not monitor.snapshot().any_held
+    assert monitor.snapshot().new_presses == 0
     assert not monitor._down and not monitor._releases and not monitor._pulses
     monitor.stop()
 

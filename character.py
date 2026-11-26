@@ -285,7 +285,7 @@ class CatArt:
         points = self.blended('head-shape', 'head-sleep', s)
         shape = curve([face.outline(x - cx, y - cy) for x, y in points])
         p.drawPath(shape); self.head_hit_paths.append(shape)
-        blink = max(pose.blink, smoothstep((s - .35) / .65), pose.yawn * .92,
+        blink = max(pose.blink, pose.yawn * .92,
                     pose.groom * (.65 if pose.action == 'wash' else .2))
         p.save(); p.setClipPath(shape)
         face_points = [(mix(x - 101, (x - 101) * .76, s),
