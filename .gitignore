@@ -44,3 +44,6 @@ htmlcov/
 tmp/
 artifacts/
 .DS_Store
+
+# Windows source installation
+.venv-win/
