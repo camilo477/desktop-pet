@@ -6,6 +6,7 @@ import os
 import threading
 import time
 
+from keyboard_distributions import DISTRIBUTIONS
 from keyboard_layout import Keyboard
 
 PULSE_SECONDS = .20
@@ -117,10 +118,8 @@ class ActivityMonitor:
                         raise self.StopException()
                     self.xkb = None
                     try:
-                        xkb = XkbKeyboard(display)
-                        layout = xkb.refresh()
-                        self.xkb = xkb
-                        monitor.set_layout(layout, self)
+                        self.xkb = XkbKeyboard(display)
+                        self.refresh_layout()
                     except Exception:
                         monitor.set_layout(None, self)
                     with monitor._lock:
@@ -183,6 +182,7 @@ class ActivityMonitor:
                 self.enabled = enabled  # Keep local interaction available after backend failure.
 
     def set_layout(self, layout, source=None):
+        layout = layout if layout in DISTRIBUTIONS else None
         with self._lock:
             if (source is None or source is self._keyboard_listener) and layout != self._activity.layout:
                 self._activity = replace(self._activity, layout=layout)
@@ -303,7 +303,7 @@ class ActivityMonitor:
     def snapshot(self):
         now = time.monotonic()
         listener = self._keyboard_listener
-        if self.enabled and listener and hasattr(listener, 'xkb') and now >= self._next_layout_check:
+        if self.enabled and listener and self._reader and now >= self._next_layout_check:
             self._next_layout_check = now + 2
             try:
                 listener.refresh_layout()
@@ -322,6 +322,8 @@ class ActivityMonitor:
         with self._lock:
             if self._keyboard_listener is not None and not self._keyboard_listener.is_alive():
                 self._clear_keys(); self._reader = None
+                if self._activity.layout is not None:
+                    self._activity = replace(self._activity, layout=None)
             if bitmap is not None:
                 for code, (_, pressed_at) in list(self._down.items()):
                     if isinstance(code, int) and pressed_at <= sampled_at and not bitmap[code // 8] & (1 << (code % 8)):
@@ -364,8 +366,9 @@ class ActivityMonitor:
     def stop(self):
         with self._lock:
             self.enabled = False
-            self._activity = Activity(layout=self._activity.layout)
+            self._activity = Activity()
             self._clear_keys()
+            self._next_layout_check = 0.0
             self._next_reconcile = 0.0
             self._global_position = self._local_position = None
             self._last_press = -math.inf

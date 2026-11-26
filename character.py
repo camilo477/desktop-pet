@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
@@ -131,24 +131,34 @@ class CatArt:
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#647078'))
         p.save(); p.translate(0, 2 * KEYBOARD_SCALE); p.drawPath(self.board_top); p.restore()
         p.setBrush(QColor('#929ea2')); p.drawPath(self.board_top)
+        self.legends = {}
+        font = QFont('sans-serif')
+        font.setPixelSize(16)
+        cap_height = QFontMetricsF(font).capHeight()
         for key in self.model.by_id.values():
-            self.draw_key(p, key, False, scale)
+            label = self.model.label(key.identifier)
+            if scale >= 1 and label:
+                glyph = QPainterPath()
+                glyph.addText(0, 0, font, label)
+                box = glyph.boundingRect()
+                fit = min(3.2 / cap_height, (key.width * 5.2 - .5) / max(1, box.width()),
+                          3.65 / max(1, box.height()))
+                if fit * cap_height * scale * KEYBOARD_SCALE >= 1.9:
+                    x, y, ux, uy, vx, vy = key.label_basis
+                    transform = QTransform(ux, uy, vx, vy, x, y)
+                    transform.scale(fit, fit)
+                    transform.translate(-box.center().x(), -box.center().y())
+                    self.legends[key.identifier] = transform.map(glyph)
+            self.draw_key(p, key, False)
         p.end(); self.keyboard.setDevicePixelRatio(scale)
 
-    def draw_key(self, p, key, down, scale, pressure=0.0):
+    def draw_key(self, p, key, down, pressure=0.0):
         p.save(); p.translate(0, (KEY_TRAVEL if down else 0) + pressure * .45 * KEYBOARD_SCALE)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#829294' if down else '#ccd2ce'))
         p.drawPath(self.key_paths[key.identifier])
-        label = self.model.label(key.identifier)
-        if scale >= 1 and label:
-            font = QFont('sans-serif'); font.setPixelSize(3)
-            p.setFont(font); p.setPen(QColor('#39454b'))
-            x, y, ux, uy, vx, vy = key.label_basis
-            p.setTransform(QTransform(ux, uy, vx, vy, x, y), True)
-            bounds = QRectF(-key.width * 2.5 + .3, -2.5, key.width * 5 - .6, 5)
-            metrics = QFontMetricsF(font)
-            if metrics.horizontalAdvance(label) < bounds.width() - .4:
-                p.drawText(bounds, Qt.AlignmentFlag.AlignCenter, label)
+        legend = self.legends.get(key.identifier)
+        if legend is not None:
+            p.fillPath(legend, QColor('#39454b'))
         p.restore()
 
     def layer(self, p, name):
@@ -372,7 +382,7 @@ class CatArt:
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():
             key = self.model.by_id[identifier]
-            self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
+            self.draw_key(p, key, identifier in pose.pressed, pressures.get(identifier, 0))
         washing_face = pose.action == 'wash' and pose.groom > .01
         if not washing_face:
             self._arm(p, pose, -1, body)

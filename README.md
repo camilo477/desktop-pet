@@ -9,8 +9,8 @@ activity in a transparent window without taking keyboard focus.
 - Minimal charcoal silhouettes, warm golden eyes, grounded haunches and
   subtle flat shading that follows the body and its continuous forelegs.
 - A shared body deformation keeps the chest, neck, shoulders and head connected.
-- A full-size 105-key QWERTY keyboard, including function keys, navigation and
-  a separate number pad. Key shapes also define the paws' contact targets.
+- Five physical keyboard sizes with ANSI or ISO keys and eight sets of legends.
+  Each keycap supplies the target for the paw and the highlight for a press.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
   mouse appears on the viewer's left.
 - Actual key presses, holds and releases on X11, including simultaneous keys.
@@ -121,8 +121,7 @@ while the body regains its balance. The next pointer movement starts from the
 release position. Empty areas allow clicks through where supported.
 
 The right-click menu offers **Tamaño** (150, 200 or 300
-logical pixels), **Siempre
-visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
+logical pixels), **Teclado**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
 Pausing stops the animation timer and input listeners while keeping dragging
@@ -151,16 +150,52 @@ key keeps it awake. Input or a direct click wakes it smoothly.
 Sleep runs at about 10 FPS; pausing stops rendering entirely. These intervals
 are simple constants in `animations.py`.
 
+## Choosing a keyboard
+
+Right-click Miga and open **Teclado**. These choices apply immediately and are
+saved for the next launch. Your computer keeps its own keyboard settings.
+
+- **Distribución** sets the legends. Choose **Automática**, US or UK QWERTY,
+  Latin American or Spain Spanish, German QWERTZ, French AZERTY (traditional),
+  US Dvorak or standard Colemak. For example, pressing the physical US Q
+  position lights A on French AZERTY and the apostrophe on Dvorak.
+- **Formato** selects the physical arrangement. The compact layouts represent
+  common designs. The table counts physical caps, including Fn where shown.
+- **Estándar físico** selects ANSI or ISO. ISO has a two-row, stepped Enter,
+  a shorter left Shift and one extra key. ANSI has a horizontal Enter and
+  places the backslash position above it. All five formats support both.
+
+| Format | ANSI | ISO | Dedicated blocks |
+|---|---:|---:|---|
+| 100 % | 104 | 105 | Function row, navigation, arrows and number pad |
+| TKL | 87 | 88 | Function row, navigation and arrows |
+| 75 % | 83 | 84 | Close-spaced function row, arrows and a navigation column |
+| 65 % | 68 | 69 | Arrows and a navigation column |
+| 60 % | 61 | 62 | Number row, main typing block and modifiers |
+
+New and upgraded installations default to **Automática**, **100 %** and **ISO**.
+Smaller boards keep the same key pitch. The mouse moves slightly closer and the
+paws settle around the selected board. Changing geometry preserves physical
+holds and releases targets for keys that disappear. Pressing an absent key still
+counts as activity. Firmware can send a function or navigation code without
+revealing the underlying switch or Fn layer, so Miga only reaches identifiable,
+represented positions. Small legends appear as the rendering resolution permits.
+
 ## Linux compatibility
 
 - **X11:** global input uses pynput's pinned X backend, with Qt cursor tracking.
-  A compositor and the X server's input recording support are needed. Physical
-  QWERTY positions are used for US, UK, Spanish and Latin American layouts;
-  Spanish layouts display Ñ. Other layouts use an unshifted key mapping where
-  a corresponding represented key can be identified.
-  Number-pad positions remain distinct when Num Lock is off on supported physical layouts.
+  A compositor and X11 RECORD support are needed. XKB key names identify the
+  physical switches independently of the character produced, modifiers or Num
+  Lock. Automatic mode uses the active group and the XKB rules, layout and
+  variant published by the server. Key events carry group changes. Miga also
+  checks the group and configuration about every two seconds while listeners
+  run, including when the keyboard is idle. Physical names refresh when the
+  rules change or listeners restart. A custom keymap that leaves the rules
+  metadata unchanged may need manual selection or a restart of activity reactions.
+  Unknown or unavailable layouts show an explicit US fallback in the menu.
+  Positions with unknown physical names contribute activity only.
 - **Wayland, including XWayland sessions:** global input listeners are disabled.
-  Local pointer reactions, idle animations, clicks and menu controls remain
+  Manual keyboard selection, local pointer reactions, idle animations, clicks and menu controls remain
   available. Native Wayland dragging uses the compositor's move request. Body
   sway uses position changes reported by Qt; a compositor that hides window
   coordinates can still move the pet, with reduced directional sway.
@@ -186,12 +221,7 @@ Wayland sessions; local pointer tracking still works while the pointer is over
 Miga. Without an X11 input-recording facility, global activity can be unavailable
 even when local interactions work.
 
-Two paws cannot physically cover every held key. Priority follows reach and
-availability; all recognized keys still show their pressed state. Labels are
-omitted when rendering resolution is too small, and unsupported keys do not
-generate invented strokes. Keyboard layout changes take effect after restarting
-input reactions; switching among existing XKB layout groups is detected while running.
-With a paw reserved for the mouse, very distant keys may exceed the remaining
-paw's comfortable reach. Their input state is still displayed; a contact reaction
-only occurs if the paw actually reaches the key. The full-size layout includes
-the extra ISO key, but does not reproduce every hardware-specific keycap shape.
+Each represented key lights on the first available frame. The paws follow the
+current targets. Fast typing can redirect a paw before it lands, and with one
+paw reserved for the mouse a distant key may exceed the other paw's reach.
+A contact reaction occurs only when the paw reaches the key.

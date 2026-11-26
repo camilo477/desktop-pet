@@ -109,6 +109,7 @@ class Paw:
     pressure: float = 0.0
     distance: float = 0.0
     ready: tuple[float, float] | None = None
+    ready_until: float = -math.inf
 
     def aim(self, goal, point, stamp=0.0, interval=.33, keystroke=False):
         if self.goal != goal or self.motion_stamp != stamp:
@@ -640,6 +641,7 @@ class Animations:
                 point = self.keyboard.by_id[paw.key].contact
                 paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval, keystroke=True)
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
+                paw.ready_until = now + .6
             elif playing and self.action_kind in ('lick', 'wash') and index == 0:
                 paw.aim('groom', face.grooming_target(self.action_kind, phase))
             elif playing and motion.rub and side == pose.action_side:
@@ -647,7 +649,7 @@ class Animations:
                 paw.aim('ear_rub', (mix(rest[0], x, motion.rub), mix(rest[1], y + 3.5, motion.rub)))
             elif playing and offset is not None:
                 paw.aim(self.action_kind, (rest[0] + offset[0], rest[1] + offset[1]))
-            elif now - activity.keyboard < .70 and paw.ready is not None:
+            elif paw.ready is not None and now < paw.ready_until:
                 paw.aim('ready', paw.ready)
             else:
                 paw.aim('rest', rest)

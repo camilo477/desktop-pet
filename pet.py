@@ -7,7 +7,8 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, QSize, Qt,
 from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
-from keyboard_layout import Keyboard
+from keyboard_distributions import DISTRIBUTIONS
+from keyboard_layout import FORMATS, STANDARDS, Keyboard
 from animations import Animations
 from character import CatArt
 from activity import Activity, ActivityMonitor, supports_global_input
@@ -51,7 +52,12 @@ class PetWindow(QWidget):
         self.mask_supported = platform == "xcb" or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.global_input = supports_global_input(platform)
-        self.keyboard = Keyboard()
+        self.layout_mode = self.preference('layout_mode', ('auto', 'manual'), 'auto')
+        self.manual_layout = self.preference('layout', DISTRIBUTIONS, 'us')
+        self.detected_layout = None
+        self.keyboard = Keyboard(self.preference('format', FORMATS, '100'),
+                                 self.preference('standard', STANDARDS, 'ISO'),
+                                 self.effective_layout())
         self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit, self.keyboard)
         self.activity_ready.connect(self.input_arrived, Qt.ConnectionType.QueuedConnection)
         self.local_gaze = (0.0, 0.0)
@@ -139,8 +145,9 @@ class PetWindow(QWidget):
     def tick(self) -> None:
         now = time.monotonic()
         activity = self.activity.snapshot() if self.reactions else Activity()
-        if self.reactions:
-            self.keyboard.layout = activity.layout or 'us'
+        if self.reactions and self.detected_layout != activity.layout:
+            self.detected_layout = activity.layout
+            self.keyboard.layout = self.effective_layout()
         gaze = (0.0, 0.0)
         if now - self.local_pointer_time >= 1.2:
             self.local_pointer = None
@@ -408,6 +415,62 @@ class PetWindow(QWidget):
             self.settings.setValue(key, value)
         self.settings.sync()
 
+    def preference(self, name, choices, default):
+        value = self.settings.value(f'keyboard/{name}', default, type=str)
+        return value if value in choices else default
+
+    def effective_layout(self):
+        if self.layout_mode == 'manual':
+            return self.manual_layout
+        return self.detected_layout or 'us'
+
+    def configure_keyboard(self, *, layout=None, form=None, standard=None):
+        form = self.keyboard.form if form is None else form
+        standard = self.keyboard.standard if standard is None else standard
+        if form not in FORMATS or standard not in STANDARDS:
+            return
+        if layout is not None:
+            if layout != 'auto' and layout not in DISTRIBUTIONS:
+                return
+            self.layout_mode = 'auto' if layout == 'auto' else 'manual'
+            self.settings.setValue('keyboard/layout_mode', self.layout_mode)
+            if self.layout_mode == 'manual':
+                self.manual_layout = layout
+                self.settings.setValue('keyboard/layout', layout)
+        changed_shape = (form, standard) != (self.keyboard.form, self.keyboard.standard)
+        if changed_shape:
+            self.keyboard = Keyboard(form, standard, self.effective_layout())
+            held = self.activity.set_keyboard(self.keyboard)
+            self.animations.set_keyboard(self.keyboard, held)
+            self.art.set_keyboard(self.keyboard)
+            self.settings.setValue('keyboard/format', form)
+            self.settings.setValue('keyboard/standard', standard)
+        else:
+            self.keyboard.layout = self.effective_layout()
+        self.render_frame(force_mask=changed_shape)
+        self.settings.sync()
+
+    def keyboard_menu(self, parent):
+        menu = parent.addMenu('Teclado')
+        auto_name = DISTRIBUTIONS.get(self.detected_layout, 'sin identificar · muestra EE. UU.')
+        if self.detected_layout and (self.paused or not self.reactions):
+            auto_name = f'última conocida · {auto_name}'
+        layouts = {'auto': f'Automática ({auto_name})', **DISTRIBUTIONS}
+        selected = 'auto' if self.layout_mode == 'auto' else self.manual_layout
+        for title, parameter, options, current in (
+            ('Distribución', 'layout', layouts, selected),
+            ('Formato', 'form', FORMATS, self.keyboard.form),
+            ('Estándar físico', 'standard', {s: s for s in STANDARDS}, self.keyboard.standard),
+        ):
+            submenu = menu.addMenu(title)
+            group = QActionGroup(submenu)
+            for value, label in options.items():
+                action = submenu.addAction(label)
+                action.setCheckable(True)
+                group.addAction(action)
+                action.setChecked(value == current)
+                action.triggered.connect(lambda checked, k=parameter, v=value: self.configure_keyboard(**{k: v}))
+
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
         size_menu = menu.addMenu("Tamaño")
@@ -419,6 +482,7 @@ class PetWindow(QWidget):
             action.setChecked(self.width() == size)
             sizes.addAction(action)
             action.triggered.connect(lambda checked, value=size: self.set_size(value))
+        self.keyboard_menu(menu)
         for label, checked, callback in (
             ("Siempre visible", self.always_on_top, self.set_always_on_top),
             ("Reaccionar a actividad", self.reactions, self.set_reactions),

@@ -59,27 +59,38 @@ class XkbKeyboard:
         self.rules_atom = display.intern_atom('_XKB_RULES_NAMES')
         self.groups = ()
         self.positions = {}
+        self._rules = None
 
-    def refresh(self):
-        display = self.display
-        names = GetNames(display=display.display, opcode=self.opcode, device=CORE_KEYBOARD, which=KEY_NAMES)
+    def read_positions(self):
+        names = GetNames(display=self.display.display, opcode=self.opcode, device=CORE_KEYBOARD, which=KEY_NAMES)
         positions = {}
         if names.which == KEY_NAMES:
             for i in range(names.count):
                 name = names.names[i*4:i*4+4].rstrip(b'\0').decode('ascii', 'replace')
                 if name in POSITIONS:
                     positions[names.first + i] = POSITIONS[name]
-        self.positions = positions
+        return positions
+
+    def refresh(self):
+        display = self.display
         prop = display.screen().root.get_full_property(self.rules_atom, 0)
-        fields = bytes(prop.value).split(b'\0') if prop else []
-        groups = []
-        if len(fields) >= 4:
-            variants = fields[3].decode('ascii', 'replace').split(',')
-            for i, layout in enumerate(fields[2].decode('ascii', 'replace').split(',')):
-                groups.append(detected_layout(layout, variants[i] if i < len(variants) else ''))
-        self.groups = tuple(groups)
+        rules = bytes(prop.value) if prop else b''
+        if rules != self._rules:
+            fields = rules.decode('ascii', 'replace').split('\0')
+            groups = []
+            if len(fields) >= 4:
+                variants = fields[3].split(',')
+                for i, layout in enumerate(fields[2].split(',')):
+                    groups.append(detected_layout(layout, variants[i] if i < len(variants) else ''))
+            self.positions = self.read_positions()
+            self.groups = tuple(groups)
+            self._rules = rules
         state = GetState(display=display.display, opcode=self.opcode, device=CORE_KEYBOARD)
         return self.layout(state.group)
 
     def layout(self, group):
+        # After replacing a multi-group map, X can keep the previous group locked.
+        # A single configured layout still has only one possible set of legends.
+        if len(self.groups) == 1:
+            return self.groups[0]
         return self.groups[group] if group < len(self.groups) else None

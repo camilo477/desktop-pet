@@ -4,11 +4,13 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
+from tempfile import TemporaryDirectory
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QSettings, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
@@ -17,6 +19,7 @@ from animations import Animations
 from character import CatArt
 from keyboard_distributions import DISTRIBUTIONS, detected_layout
 from keyboard_layout import FORMATS, KEY_TRAVEL, Keyboard, STANDARDS
+from pet import PetWindow
 
 
 def paint(art, pose, size=300):
@@ -74,6 +77,25 @@ def check_distributions():
         'dvorak': ('Q', "'"), 'colemak': ('P', ';'),
     }
     assert samples.keys() == DISTRIBUTIONS.keys()
+    assert detected_layout('us', 'colemak') == 'colemak'
+    assert detected_layout('us', 'dvorak') == 'dvorak'
+    assert detected_layout('us', 'colemak_dh') is None
+    assert detected_layout('latam', 'dvorak') is None
+    assert detected_layout('unknown', '') is None
+    for layout, positions, legends in (
+        ('de', ('Y', 'Z', 'BracketLeft', 'Semicolon', 'Quote'), 'ZYÜÖÄ'),
+        ('fr', ('Q', 'W', 'A', 'Z', 'Digit2', 'Digit7', 'Digit9'), 'AZQWéèç'),
+        ('dvorak', tuple('QWERTYASDF'), "',.PYFAOEU"),
+        ('colemak', tuple('QWERTYASDF'), 'QWFPGJARST'),
+        ('latam', ('Equal', 'BracketLeft', 'Semicolon', 'Quote', 'Backslash'), '¿´Ñ{}'),
+        ('es', ('Equal', 'BracketLeft', 'Semicolon', 'Quote', 'Backslash'), '¡`Ñ´Ç'),
+    ):
+        kb = Keyboard(layout=layout)
+        assert ''.join(kb.label(position) for position in positions) == legends
+    for layout in ('us', 'es', 'latam', 'de', 'fr', 'dvorak'):
+        assert Keyboard(layout=layout).label('IntlBackslash') == '<'
+    assert Keyboard(layout='gb').label('IntlBackslash') == '\\'
+    assert Keyboard(layout='colemak').label('IntlBackslash') == '-'
     for layout, (identifier, legend) in samples.items():
         kb = Keyboard('tkl', 'ISO', layout)
         assert kb.label(identifier) == legend
@@ -92,7 +114,6 @@ def check_distributions():
             animation.advance(1 / 30, 1 + (i+1)/30, inputs)
         paw = next(p for p in animation.paws if p.landed)
         assert math.dist((paw.x, paw.y), (key.contact[0], key.contact[1] + KEY_TRAVEL)) < 1.05
-    assert detected_layout('us', 'colemak_dh') is None and detected_layout('de', 'dvorak') is None
 
 
 def check_absent():
@@ -114,12 +135,128 @@ def check_absent():
     assert any(p.goal == 'F1' for p in a.paws)
     a.set_keyboard(kb, monitor.set_keyboard(kb))
     assert not pose.pressed and not pose.contacts and all(p.key is None for p in a.paws)
+    now = state.keyboard + 1
+    a.advance(1/30, now, Activity(held=frozenset({'A'})))
+    for i in range(40):
+        a.advance(1/30, now + (i+1)/30)
+    # An absent press must not revive a previous ready position.
+    a.advance(1/30, now + 2, Activity(keyboard=now + 2, any_held=True))
+    assert all(p.goal == 'rest' for p in a.paws)
     monitor.stop()
+
+
+def check_live_menu():
+    # Exercise the actual QAction callbacks with isolated preferences and synthetic input.
+    config = QSettings()
+    for key in ('format', 'standard', 'layout_mode', 'layout'):
+        config.setValue(f'keyboard/{key}', 'invalid')
+    w = PetWindow()
+    w.show()
+    origin, size = w.pos(), w.size()
+    assert (w.layout_mode, w.keyboard.form, w.keyboard.standard) == ('auto', '100', 'ISO')
+    def choose(submenu, label):
+        menu = w.build_menu()
+        keyboards = next(a.menu() for a in menu.actions() if a.text() == 'Teclado')
+        choices = next(a.menu() for a in keyboards.actions() if a.text() == submenu)
+        assert sum(a.isChecked() for a in choices.actions()) == 1
+        action = next(a for a in choices.actions() if a.text().startswith(label))
+        action.trigger()
+        assert action.isChecked()
+        menu.deleteLater()
+
+    w.activity.set_layout('de')
+    w.tick()
+    a = w.animations
+    personality = a.personality
+    stamp = a.last_activity
+    layers = w.art.layers['paw'][1].cacheKey()
+    for layout in ('fr', 'colemak'):
+        before = w.art.keyboard.cacheKey()
+        coords = w.art.key_paths
+        choose('Distribución', DISTRIBUTIONS[layout])
+        assert w.keyboard.layout == layout and w.art.keyboard.cacheKey() != before
+        assert w.art.key_paths is coords and w.art.layers['paw'][1].cacheKey() == layers
+    choose('Distribución', 'Automática')
+    assert w.keyboard.layout == 'de' and a.last_activity == stamp
+    w.activity.key_down('Numpad1')
+    w.activity.key_down('Q')
+    w.tick()
+    assert a.pose.pressed == {'Q', 'Numpad1'}
+    before_mask = w.last_mask
+    choose('Formato', '60 %')
+    assert w.last_mask != before_mask and a.pose.pressed == {'Q'}
+    w.tick()
+    assert 'Q' in (a.pose.left_key, a.pose.right_key)
+    choose('Formato', 'TKL')
+    w.activity.pointer_moved(1, 1)
+    w.activity.pointer_moved(18, 20)
+    w.tick()
+    assert a.paws[0].goal == 'mouse'
+    choose('Estándar físico', 'ANSI')
+    w.tick()
+    assert a.paws[0].goal == 'mouse' and a.paws[1].goal == 'Q'
+    choose('Formato', '100 %')
+    assert a.pose.pressed == {'Q', 'Numpad1'}
+    w.activity.key_up('Numpad1')
+    w.activity.key_up('Q')
+    time.sleep(.23)
+    w.tick()
+    assert not a.pose.pressed and a.personality is personality
+    w.set_reactions(False)
+    choose('Distribución', DISTRIBUTIONS['dvorak'])
+    choose('Formato', '75 %')
+    assert not w.activity.enabled and w.keyboard.layout == 'dvorak'
+    w.set_paused(True)
+    before = a.time
+    choose('Formato', '65 %')
+    choose('Estándar físico', 'ISO')
+    assert a.time == before and not w.timer.isActive()
+    assert w.pos() == origin and w.size() == size and w.art.model is a.keyboard is w.activity.keyboard
+    w.shutdown()
+    restored = PetWindow()
+    assert (restored.keyboard.form, restored.keyboard.standard, restored.keyboard.layout) == ('65', 'ISO', 'dvorak')
+    assert restored.paused and not restored.reactions and restored.pos() == origin
+    restored.shutdown()
+
+
+def check_priority():
+    for rate, form, layout, pointer, scroll in (
+            (3, '100', 'gb', False, False), (6, '75', 'de', False, True),
+            (10, 'tkl', 'fr', True, False), (15, '60', 'dvorak', False, False)):
+        kb = Keyboard(form, 'ANSI', layout)
+        a = Animations(kb)
+        a.last_activity = 0
+        for i in range(85):
+            a.advance(.1, 200 + i / 10)
+        assert a.sleeping
+        for i in range(60):
+            now = 210 + i / 30
+            edge = i * rate // 30 != (i-1) * rate // 30
+            key = ('Q', 'P')[i * rate // 30 % 2]
+            state = Activity(keyboard=now, new_presses=int(edge), key_interval=1/rate,
+                             held=frozenset({key}), latest=KeyHint(key, now) if edge else KeyHint(),
+                             mouse=now if pointer else -math.inf, scroll=now if scroll else -math.inf,
+                             scroll_y=int(scroll), motion_x=int(pointer))
+            pose = a.advance(1/30, now, state)
+            assert pose.pressed == {key} and key in (pose.left_key, pose.right_key)
+            if pointer or scroll:
+                assert a.paws[0].goal == 'mouse' and a.paws[1].key == key
+        assert pose.sleep < .01
+        for i in range(30):
+            pose = a.advance(1/30, 213+i/30)
+        assert not pose.pressed and all(p.goal == 'rest' for p in a.paws)
 
 
 if __name__ == '__main__':
     app = QApplication([])
-    check_geometry()
-    check_distributions()
-    check_absent()
-    print('PASS: ten physical geometries, eight distributions, painted key presses, paw contacts and absent keys.')
+    with TemporaryDirectory() as prefs:
+        app.setOrganizationName('miga-tests')
+        app.setApplicationName('keyboards')
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, prefs)
+        check_geometry()
+        check_distributions()
+        check_absent()
+        check_priority()
+        check_live_menu()
+    print('PASS: ten geometries, eight layouts, painted contacts, live menu, held keys, sleep, cadence and persistence.')
