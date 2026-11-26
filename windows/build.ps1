@@ -12,7 +12,7 @@ try {
     $python = Join-Path $work 'Scripts\python.exe'
     & $python -m pip install -r (Join-Path $root 'requirements.txt') 'pyinstaller>=6.15,<7'
     if ($LASTEXITCODE) { throw 'Could not install the build tools.' }
-    & $python -m PyInstaller --windowed --onedir --noupx --name Miga --distpath $out --workpath (Join-Path $work 'work') --specpath $work --add-data ((Join-Path $root 'assets') + ';assets') --exclude-module linux_runtime --exclude-module x11_input --exclude-module pynput (Join-Path $root 'main.py')
+    & $python -m PyInstaller --windowed --onedir --noupx --name Miga --distpath $out --workpath (Join-Path $work 'work') --specpath $work --add-data ((Join-Path $root 'assets') + ';assets') --exclude-module macos_runtime --exclude-module macos_input --exclude-module macos_window --exclude-module linux_runtime --exclude-module x11_input --exclude-module pynput (Join-Path $root 'main.py')
     if ($LASTEXITCODE) { throw 'Miga packaging failed.' }
 } finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -Recurse -Force -LiteralPath $work }

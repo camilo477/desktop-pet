@@ -2,7 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import os
 import socket
+from PySide6.QtCore import QCoreApplication, QSettings
 import subprocess
 import sys
 import time
@@ -27,6 +29,17 @@ def server():
 
 if __name__ == '__main__':
     assert not instance_busy(directory), 'Use a disposable session without Miga running'
+    disposable = os.environ.get('GITHUB_ACTIONS') == 'true'
+    if disposable:
+        qapp = QCoreApplication([])
+        qapp.setOrganizationName('desktop-pet')
+        qapp.setOrganizationDomain('camilo477.github.io')
+        qapp.setApplicationName('mascota')
+        settings = QSettings()
+        settings.setValue('size', 201)  # The app normalizes this to 200 on close.
+        settings.setValue('appearance/coat', 'calico')
+        settings.setValue('keyboard/format', '65')
+        settings.sync()
     try:
         subprocess.run(['open', '-g', app], check=True)
         for _ in range(150):
@@ -48,4 +61,8 @@ if __name__ == '__main__':
     finally:
         subprocess.run([cli, 'off'], check=True, timeout=12)
     assert not instance_busy(directory)
+    if disposable:
+        settings.sync()
+        assert settings.value('size', type=int) == 200
+        assert settings.value('appearance/coat') == 'calico' and settings.value('keyboard/format') == '65'
     print('PASS: Finder, concurrent detached terminal starts, ping, off and released lock.')

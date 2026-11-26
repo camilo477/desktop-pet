@@ -34,7 +34,12 @@ class Window(PetWindow):
 
 def desktop_checks(w):
     # The only foreground target is this runner's own test window.
-    target = QWidget()
+    class Target(QWidget):
+        received = False
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key.Key_A:
+                self.received = True
+    target = Target()
     target.setGeometry(60, 60, 400, 360)
     target.show()
     w.move(85, 90)
@@ -54,19 +59,30 @@ def desktop_checks(w):
     assert hit(2, 2) == behind.windowNumber(), 'Transparent corner must expose the window below'
     if (os.environ.get('GITHUB_ACTIONS') == 'true' and w.mac_input.status == 'active'
             and CG.CGPreflightPostEventAccess()):
-        # Target only this process. Some macOS versions deliver PID-directed
-        # events downstream of the session tap. Never post to another process.
-        w.timer.stop()
-        w.activity.snapshot()
-        from PySide6.QtCore import QSignalBlocker
-        with QSignalBlocker(w):
-            for down in (True, False):
-                event = CG.CGEventCreateKeyboardEvent(None, 0, down)
-                CG.CGEventPostToPid(os.getpid(), event)
-            wait(80)
-            state = w.activity.snapshot()
-        print('Own-process synthetic delivery observed by session tap:', 'A' in state.pulses)
-        w.timer.start(34)
+        app = AppKit.NSApplication.sharedApplication()
+        target.activateWindow()
+        app.activateIgnoringOtherApps_(True)
+        behind.makeKeyAndOrderFront_(None)
+        wait(150)
+        if app.isActive() and app.keyWindow() == behind:
+            w.timer.stop()
+            QApplication.processEvents()
+            w.activity.snapshot()
+            from PySide6.QtCore import QSignalBlocker
+            with QSignalBlocker(w):
+                for down in (True, False):
+                    event = CG.CGEventCreateKeyboardEvent(None, 0, down)
+                    CG.CGEventSetTimestamp(event, time.monotonic_ns())
+                    assert app.isActive() and app.keyWindow() == behind
+                    CG.CGEventPost(CG.kCGSessionEventTap, event)
+                wait(80)
+                state = w.activity.snapshot()
+            assert target.received and state.new_presses == 1 and not state.any_held, (
+                target.received, state.new_presses, state.any_held)
+            print('PASS: synthetic session events reached the real listen-only tap and our foreground window.')
+            w.timer.start(34)
+        else:
+            print('Session delivery untested: the runner did not foreground the controlled target.')
     target.close()
     print('PASS: native WindowServer hit targets on the cat and behind its transparent corner.')
 
@@ -89,6 +105,12 @@ def checks(w):
 
     # Native permission query above. Model denial/revocation without changing TCC.
     with patch.object(CG, 'CGPreflightListenEventAccess', return_value=False):
+        if backend.tap is not None:
+            w.activity.key_down('X', (7,))
+            backend.held.add(7)
+            backend.next_check = 0
+            backend.poll(time.monotonic())
+            assert backend.tap is None and not w.activity.snapshot().any_held
         backend.configure(False)
         backend.configure(True)
         assert backend.status == 'denied' and not w.activity.native_pointer
@@ -133,7 +155,8 @@ def benchmark(w):
                     break
             assert w.animations.sleeping
         wall, cpu, frames = time.monotonic(), time.process_time(), w.frames
-        wait(5000)
+        QTimer.singleShot(5000, QApplication.quit)
+        QApplication.instance().exec()
         elapsed = time.monotonic() - wall
         used = 100 * (time.process_time() - cpu) / elapsed
         keys.stop()

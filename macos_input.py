@@ -7,6 +7,7 @@ import AppKit
 import CoreFoundation as CF
 from Foundation import NSOperationQueue
 from Quartz import CoreGraphics as CG
+from PySide6.QtGui import QCursor
 
 from macos_keyboard import MODIFIERS, modifier_down, physical_key, source_layout, wheel_units
 
@@ -61,6 +62,7 @@ class MacInput:
         self.status = 'off'
         self.enabled = False
         self.held = set()
+        self.motion_after = 0
         self.tap = self.source = None
         self.next_check = self.next_reconcile = 0.
         self.inactive = set()
@@ -199,7 +201,7 @@ class MacInput:
                 self.monitor.key_down(physical_key(code, iso), (code,), initial=bool(repeat))
             else:
                 self.up(code)
-        elif kind in MOVES:
+        elif kind in MOVES and CG.CGEventGetTimestamp(event) > self.motion_after:
             point = CG.CGEventGetLocation(event)  # Global display points, y grows down.
             self.monitor.pointer_moved(point.x, point.y)
         elif kind in CLICKS:
@@ -210,6 +212,12 @@ class MacInput:
                     if continuous else (CG.kCGScrollWheelEventDeltaAxis2, CG.kCGScrollWheelEventDeltaAxis1))
             self.monitor.pointer_scrolled(*wheel_units(FIELD(event, x), FIELD(event, y), continuous))
         return event
+
+    def end_drag(self):
+        self.motion_after = time.monotonic_ns()
+        self.monitor.reset_pointer_origin()
+        point = QCursor.pos()
+        self.monitor.pointer_moved(point.x(), point.y())
 
     def request_access(self):
         CG.CGRequestListenEventAccess()
