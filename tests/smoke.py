@@ -348,8 +348,9 @@ def check_geometry_and_contacts() -> None:
         # Test the final painted object, including the SVG and painter transforms.
         moved = mouse_centroid(Pose(mouse_dx=pose.mouse_dx, mouse_dy=pose.mouse_dy))
         assert animation.mouse_contact
-        wheel_x, _ = mouse_centroid(pose, '#59696e')
-        assert wheel_x < moved[0] and wheel_x < pose.left_x  # Visible ahead of the planted paw.
+        wheel_x, wheel_y = mouse_centroid(pose, '#59696e')
+        forward = wheel_y - pose.left_y  # The buttons face forward from the cat, toward the viewer.
+        assert forward > 0 and abs(wheel_x - pose.left_x) < .55 * forward
         assert math.dist(BodyGeometry(pose).shoulder(-1), (pose.left_x, pose.left_y)) < 60
         for i, direction in enumerate((-dx, -dy)):
             if direction:

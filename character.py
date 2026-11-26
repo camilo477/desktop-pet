@@ -365,7 +365,7 @@ class CatArt:
         # A sleeping cat can curl in front of the parked mouse.
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
         if pose.scroll > .01:
-            p.translate(self.wheel_center); p.rotate(-14)
+            p.translate(self.wheel_center); p.rotate(-77)
             p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
             p.drawLine(QPointF(step, -.6), QPointF(step, .6))

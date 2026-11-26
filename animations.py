@@ -11,7 +11,7 @@ from personality import CALM, Expression, Personality
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
-MOUSE_REST = (42.0, 157.0)  # Paw contact on the palm end of the shell.
+MOUSE_REST = (36.5, 153.5)  # Paw contact on the palm end of the shell.
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
