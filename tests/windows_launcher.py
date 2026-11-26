@@ -1,9 +1,11 @@
 """Exercise detached Windows startup and shutdown in a disposable user session."""
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 
@@ -20,7 +22,11 @@ def main():
     if not sys.argv[1:]:
         # Interrupt only this test's own child. A new owner must be able to
         # replace its stale endpoint after Windows releases the file lock.
-        child = subprocess.Popen([sys.executable, str(ROOT / 'main.py'), '--run'])
+        # A Windows venv's python.exe can be a redirector with a child of
+        # its own. Keep a handle to the test GUI process itself.
+        env = dict(os.environ, PYTHONPATH=sysconfig.get_path('purelib'))
+        child = subprocess.Popen([str(Path(sys.base_prefix) / 'python.exe'),
+                                  str(ROOT / 'main.py'), '--run'], env=env)
         try:
             deadline = time.monotonic() + 12
             while time.monotonic() < deadline:

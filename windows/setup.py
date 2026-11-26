@@ -50,13 +50,18 @@ def update_path(state, install):
                    Path(os.path.expandvars(p.strip('"'))) == BIN]
         if install and not matches:
             entries.append(str(BIN))
-            state['path_added'] = True
-            save(state)
         elif not install and state['path_added'] and str(BIN) in entries:
             entries.remove(str(BIN))
         else:
             return
         winreg.SetValueEx(key, 'Path', 0, kind, ';'.join(entries))
+        if install:
+            state['path_added'] = True
+            try:
+                save(state)
+            except OSError:
+                winreg.SetValueEx(key, 'Path', 0, kind, value)
+                raise
     # Ask Explorer to refresh the environment inherited by new terminals.
     ctypes.windll.user32.SendMessageTimeoutW(0xffff, 0x1a, 0, 'Environment', 2, 1000, None)
 
@@ -123,6 +128,7 @@ def uninstall(state):
             break
         except PermissionError:
             if attempt == 19:
+                save(state)  # Keep ownership verifiable if a DLL is still in use.
                 raise
             time.sleep(.1)
     print('Uninstalled. Preferences and source files were kept.')

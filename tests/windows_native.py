@@ -193,6 +193,12 @@ def benchmark(app):
             QTimer.singleShot(seconds * 1000, loop.quit)
             loop.exec()
         run(1)
+        if mode == 'sleep':
+            for _ in range(8):
+                if pet.animations.sleeping:
+                    break
+                run(1)
+            assert pet.animations.sleeping
         cpu, start, frames = time.process_time(), time.monotonic(), pet.frames
         run(5)
         elapsed = time.monotonic() - start
@@ -202,7 +208,10 @@ def benchmark(app):
         assert (not pet.timer.isActive()) if mode == 'paused' else pet.timer.interval() == (100 if mode == 'sleep' else 34)
         rss = subprocess.check_output(['powershell.exe', '-NoProfile', '-Command',
                                       f'(Get-Process -Id {os.getpid()}).WorkingSet64'], text=True)
-        assert rate == 0 if mode == 'paused' else rate > (6 if mode == 'sleep' else 15)
+        if mode == 'sleep':
+            assert 7 < rate < 12
+        else:
+            assert rate == 0 if mode == 'paused' else rate > 15
         print(f'{mode}: {used:.2f}% one core, {int(rss.strip()) / 2**20:.1f} MiB RSS, {rate:.1f} FPS')
     pet.shutdown()
 
