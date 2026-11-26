@@ -53,7 +53,7 @@ def run_pet(server_name, on_ready):
                 client.disconnected.connect(client.deleteLater)
                 timeout = QTimer(client)
                 timeout.setSingleShot(True)
-                timeout.timeout.connect(client.abort)
+                timeout.timeout.connect(lambda socket=client: socket.abort())
                 timeout.start(2000)
 
                 def read_command(socket=client, timer=timeout) -> None:

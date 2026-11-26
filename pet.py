@@ -110,7 +110,11 @@ class PetWindow(QWidget):
         self.last_mask = QRegion()
         self.mask_time = 0.0
         self.mask_signature = None
-        self.timer = QTimer(self)
+        if self.native_mac:
+            from macos_clock import MacFrameTimer
+            self.timer = MacFrameTimer(self)
+        else:
+            self.timer = QTimer(self)
         self.timer.setInterval(34)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self.tick)
@@ -588,7 +592,8 @@ class PetWindow(QWidget):
             action.setCheckable(True)
             group.addAction(action)
             action.setChecked(value == current)
-            action.triggered.connect(lambda checked, v=value: choose(v))
+            action.setData(value)
+        group.triggered.connect(lambda action: choose(action.data()))
 
     def configure_appearance(self, look):
         if look == self.art.appearance:
@@ -613,15 +618,7 @@ class PetWindow(QWidget):
 
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
-        size_menu = menu.addMenu("Tamaño")
-        sizes = QActionGroup(size_menu)
-        sizes.setExclusive(True)
-        for size, title in SIZES.items():
-            action = size_menu.addAction(title)
-            action.setCheckable(True)
-            action.setChecked(self.width() == size)
-            sizes.addAction(action)
-            action.triggered.connect(lambda checked, value=size: self.set_size(value))
+        self.choice_menu(menu, "Tamaño", SIZES, self.width(), self.set_size)
         self.keyboard_menu(menu)
         self.appearance_menu(menu)
         if self.wayland:
@@ -639,7 +636,7 @@ class PetWindow(QWidget):
             action.setCheckable(True)
             action.setChecked(checked)
             action.toggled.connect(callback)
-        menu.addAction("Salir", self.close)
+        menu.addAction("Salir").triggered.connect(self.close)
         return menu
 
     def contextMenuEvent(self, event) -> None:
@@ -676,6 +673,8 @@ class PetWindow(QWidget):
             return
         self._closed = True
         self.timer.stop()
+        if self.native_mac:
+            self.timer.detach()
         self.position_timer.stop()
         if self.windows_input:
             self.windows_input.configure(None)

@@ -20,6 +20,7 @@ def prepare_panel(widget):
         panel.setHidesOnDeactivate_(False)
         panel.setHasShadow_(False)
         panel.setLevel_(AppKit.NSFloatingWindowLevel if widget.always_on_top else AppKit.NSNormalWindowLevel)
+        widget.timer.attach(panel)
 
 
 def permission_notice(widget, status):
