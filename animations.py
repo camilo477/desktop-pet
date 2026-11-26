@@ -8,7 +8,7 @@ from activity import Activity, KeyHint
 from keyboard_layout import BY_ID, KEY_TRAVEL
 from anatomy import BodyGeometry, FaceGeometry
 from idle_motion import DURATIONS, QUIET, STILL, IdleMotion, sample, smoothstep
-from personality import CALM, CONTENT, Expression, Personality
+from personality import CALM, CONTENT, CURIOUS, SURPRISED, Expression, Personality
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
@@ -45,6 +45,7 @@ class Pose:
     tail: float = 0.0
     tail_phase: float = 0.0
     tail_tip: float = 0.0
+    tail_touch: float = 0.0
     expression: Expression = CALM
     gaze_x: float = 0.0
     gaze_y: float = 0.0
@@ -163,6 +164,12 @@ class Animations:
         self.focus_point = [105.0, 160.0]
         self.head_velocity = [0.0, 0.0, 0.0]
         self.pet_start = -10.0
+        self.pet_held = False
+        self.pet_release = None
+        self.pet_release_level = 0.0
+        self.ear_touches = [-math.inf, -math.inf]
+        self.tail_touch_start = -math.inf
+        self.near_face = False
         self.sleep_goal = 0.0
         self.next_idle = IDLE_ACTION_AFTER + random.uniform(1, 8)
         self.action_kind = None
@@ -182,14 +189,30 @@ class Animations:
     def interact(self):
         self.touch_pending = True
 
-    def pet(self, side=0.0):
+    def pet(self, side=0.0, held=False):
         self.interact()
         self.pet_start = self.time
+        self.pet_held = held
+        self.pet_release = None
         self.pose.pet_side = max(-1, min(1, side))
         self.blink_start = self.time
         self.next_blink = self.time + random.uniform(3, 6)
         self.tail_start = self.time
         self.next_tail = self.time + random.uniform(10, 20)
+
+    def release_pet(self):
+        self.pet_held = False
+        self.pet_release = self.time
+        self.pet_release_level = self.pose.pet
+
+    def touch(self, region):
+        self.interact()
+        if region in ('ear-left', 'ear-right'):
+            index = int(region == 'ear-right')
+            if self.time - self.ear_touches[index] >= .43:
+                self.ear_touches[index] = self.time
+        elif region == 'tail' and self.time - self.tail_touch_start >= .58:
+            self.tail_touch_start = self.time
 
     def clear_input(self):
         # Clear the input estimates immediately, keeping the painted pose for the transition.
@@ -260,9 +283,18 @@ class Animations:
     def _expressions(self, dt, idle, active):
         t, pose = self.time, self.pose
         age = t - self.pet_start
-        pose.pet = (smoothstep(age / .14) if 0 <= age < .14 else
-                    1.0 if .14 <= age < .30 else
-                    1 - smoothstep((age - .30) / .48) if .30 <= age < .78 else 0.0)
+        if self.pet_release is not None:
+            elapsed = t - self.pet_release
+            pose.pet = self.pet_release_level * (1 - smoothstep((elapsed - .10) / .60))
+            if elapsed >= .70:
+                self.pet_release = None
+                self.pet_start = -10.0
+        elif self.pet_held:
+            pose.pet = smoothstep(age / .22) * (.94 + .055 * math.sin(age * 1.8))
+        else:
+            pose.pet = (smoothstep(age / .14) if 0 <= age < .14 else
+                        1.0 if .14 <= age < .30 else
+                        1 - smoothstep((age - .30) / .48) if .30 <= age < .78 else 0.0)
         if t >= self.next_blink:
             self.blink_start = t
             self.next_blink = t + (.38 if random.random() < .1 else random.uniform(3, 7))
@@ -343,7 +375,7 @@ class Animations:
             self.mouse_velocity[axis] = velocity
         pose.mouse_dx, pose.mouse_dy = positions
 
-    def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0)):
+    def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0), face_offset=None):
         pose = self.pose
         observed = max(activity.keyboard, activity.mouse, activity.click, activity.scroll)
         if self.last_activity is None:
@@ -365,10 +397,31 @@ class Animations:
         phase, action, playing = self._expressions(dt, idle, active)
         relaxing = max(0, min(1, (idle - RELAX_AFTER) / (SLEEP_AFTER - RELAX_AFTER)))
         pose.relax = approach(pose.relax, relaxing, .8 if relaxing > pose.relax else 6, dt)
+        distance = math.hypot(face_offset[0] / 49, face_offset[1] / 42) if face_offset else math.inf
+        self.near_face = distance < (1.22 if self.near_face else 1)
+        curious = (self.near_face and not activity.any_held and not activity.held
+                   and now - max(activity.keyboard, activity.scroll) > .65 and not pose.pet)
         expression = self.personality.update(dt, now, activity, prior_idle,
-                                             playing and self.action_kind == 'look', pose.pet, pose.relax)
+                                             curious or (playing and self.action_kind == 'look'),
+                                             pose.pet, pose.relax)
         motion = pose.motion
         expression = expression.blend(CONTENT, motion.content * (1 - pose.pet))
+        ear_lean = 0.0
+        for i, start in enumerate(self.ear_touches):
+            ear_phase = (self.time - start) / .43
+            if 0 < ear_phase < 1:
+                side = 2 * i - 1
+                flex = math.sin(math.pi * ear_phase) ** 2 * math.sin(math.tau * ear_phase + .6)
+                if i == 0:
+                    pose.ear_left -= 16 * flex
+                else:
+                    pose.ear_right += 16 * flex
+                ear_lean += side * math.sin(math.pi * ear_phase) ** 2
+        tail_phase = (self.time - self.tail_touch_start) / .58
+        pose.tail_touch = tail_phase if 0 < tail_phase < 1 else 0
+        if pose.tail_touch:
+            expression = expression.blend(SURPRISED, .35 * math.sin(math.pi * tail_phase) ** 2)
+        expression = expression.blend(CURIOUS, abs(ear_lean) * .6)
         pose.expression = expression
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
@@ -417,7 +470,11 @@ class Animations:
         pose.focus = approach(pose.focus, (0.2 if mouse_active else 1) if key_point else 0, 12, dt)
         moving = now - activity.mouse < .60
         scrolling = now - activity.scroll < MOUSE_HOLD
-        if moving and (not scrolling or now - activity.mouse < .18):
+        if curious:
+            look = (face_offset[0] / 48, face_offset[1] / 43)
+        elif self.near_face and key_point and activity.keyboard >= max(activity.mouse, activity.scroll):
+            look = ((self.focus_point[0] - 116) / 72, .95)
+        elif moving and (not scrolling or now - activity.mouse < .18):
             look = gaze
             if key_point and activity.held:
                 look = (gaze[0] * .9 + (self.focus_point[0] - 118) / 70 * .1, gaze[1] * .9 + .07)
@@ -449,6 +506,7 @@ class Animations:
         pose.head_y, self.head_velocity[1] = spring(pose.head_y, self.head_velocity[1], look[1], head_speed, dt)
         toward = max(-1, min(1, look[0] * 1.8))
         tilt = look[0] * 3.5 + toward * expression.tilt + pose.pet_side * pose.pet * 8
+        tilt += ear_lean * 3
         if playing and self.action_kind == 'look':
             tilt += self.look_side * action * 2
         pose.head_tilt, self.head_velocity[2] = spring(pose.head_tilt, self.head_velocity[2], tilt, 14, dt)

@@ -13,6 +13,7 @@ from activity import Activity, ActivityMonitor, supports_global_input
 
 
 SIZES = {150: "Pequeño", 200: "Mediano", 300: "Grande"}
+PET_HOLD_SECONDS = .32
 
 
 def visible_position(position: QPoint, size: QSize, areas: list[QRect]) -> QPoint:
@@ -52,6 +53,8 @@ class PetWindow(QWidget):
         self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit)
         self.activity_ready.connect(self.input_arrived, Qt.ConnectionType.QueuedConnection)
         self.local_gaze = (0.0, 0.0)
+        self.local_pointer = None
+        self.local_pointer_time = -math.inf
         self._closed = False
         self.setWindowTitle("Miga")
         self.setWindowFlags(
@@ -71,7 +74,9 @@ class PetWindow(QWidget):
         self.animations = Animations()
         self.last_frame = time.monotonic()
         self.press_position: QPoint | None = None
-        self.head_press: float | None = None
+        self.press_region = None
+        self.press_side = 0.0
+        self.press_time = 0.0
         self.press_origin = QPoint()
         self.dragging = False
         self.system_drag = False
@@ -133,9 +138,11 @@ class PetWindow(QWidget):
         activity = self.activity.snapshot() if self.reactions else Activity()
         self.art.set_layout(activity.layout)
         gaze = (0.0, 0.0)
+        cursor_point = self.local_pointer if now - self.local_pointer_time < 1.2 else None
         if self.reactions and now - activity.mouse < .65:
             if self.global_input:
                 cursor = QCursor.pos() - self.pos()
+                cursor_point = cursor * (200 / self.width())
                 screen = self.screen() or QApplication.primaryScreen()
                 if screen:
                     area = screen.geometry()
@@ -146,7 +153,15 @@ class PetWindow(QWidget):
                 gaze = self.local_gaze
         if self.press_position is not None or self._menu is not None:
             self.animations.interact()
-        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze)
+            cursor_point = None
+        if (self.press_region == 'head' and not self.dragging and not self.animations.pet_held
+                and now - self.press_time >= PET_HOLD_SECONDS):
+            self.animations.pet(self.press_side, held=True)
+        offset = None
+        if cursor_point is not None:
+            offset = cursor_point - self.art.head_position
+            offset = (offset.x(), offset.y())
+        self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze, offset)
         interval = 100 if self.animations.sleeping else 34
         if self.timer.interval() != interval:
             self.timer.setInterval(interval)
@@ -185,6 +200,7 @@ class PetWindow(QWidget):
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
                      round(pose.tail * math.cos(pose.tail_phase) * 20),
                      round(pose.tail_tip * 2),
+                     round(pose.tail_touch * 60),
                      round(pose.motion.curl * 30), round(pose.motion.tilt * 3),
                      round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
                      round(pose.contact * 15), round(pose.mouse_dx * 2), round(pose.mouse_dy * 2),
@@ -220,28 +236,42 @@ class PetWindow(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            point = event.position() * (200 / self.width())
+            self.press_region = self.art.region_at(point)
+            if self.press_region is None:
+                event.ignore()
+                return
             self.press_position = event.globalPosition().toPoint()
             self.press_origin = self.pos()
-            self.head_press = self.art.head_hit(event.position() * (200 / self.width()))
+            self.press_side = max(-1, min(1, (point.x() - self.art.head_position.x()) / 30))
+            self.press_time = time.monotonic()
             self.dragging = False
             self.system_drag = False
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.activity.pointer_click()
             if not self.paused:
                 self.animations.interact()
+                if self.timer.interval() > 34:
+                    self.timer.start(34)
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         position = event.globalPosition()
         self.activity.pointer_moved(position.x(), position.y(), local=True)
-        if self.reactions and not self.paused:
-            offset = event.position() * (200 / self.width()) - self.art.head_position
+        if not self.paused:
+            self.local_pointer = event.position() * (200 / self.width())
+            self.local_pointer_time = time.monotonic()
+            offset = self.local_pointer - self.art.head_position
             self.local_gaze = (offset.x() / 100, offset.y() / 100)
+            if self.press_position is None and not self.reactions and offset.manhattanLength() < 58:
+                self.animations.interact()
         if self.press_position is None:
             return
         delta = event.globalPosition().toPoint() - self.press_position
         if not self.dragging and delta.manhattanLength() >= QApplication.startDragDistance():
             self.dragging = True
+            if self.animations.pet_held:
+                self.animations.release_pet()
             if self.native_wayland and self.windowHandle():
                 self.system_drag = self.windowHandle().startSystemMove()
         if self.dragging and not self.system_drag:
@@ -258,10 +288,12 @@ class PetWindow(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.press_position is not None:
             if not self.dragging and not self.paused:
-                if self.head_press is not None and self.art.head_hit(event.position() * (200 / self.width())) is not None:
-                    self.animations.pet(self.head_press)
+                if self.animations.pet_held:
+                    self.animations.release_pet()
+                elif self.press_region == 'head':
+                    self.animations.pet(self.press_side)
                 else:
-                    self.animations.interact()
+                    self.animations.touch(self.press_region)
             self.finish_drag()
 
     def moveEvent(self, event) -> None:
@@ -271,16 +303,19 @@ class PetWindow(QWidget):
 
     def finish_drag(self) -> None:
         self.position_timer.stop()
+        moved = self.dragging
         self.press_position = None
-        self.head_press = None
+        self.press_region = None
         self.dragging = False
         self.system_drag = False
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.ensure_visible()
-        self.save_preferences()
+        if moved:
+            self.ensure_visible()
+            self.save_preferences()
 
     def leaveEvent(self, event) -> None:
         self.local_gaze = (0.0, 0.0)
+        self.local_pointer = None
         super().leaveEvent(event)
 
     def set_size(self, size: int) -> None:
@@ -309,6 +344,11 @@ class PetWindow(QWidget):
 
     def set_paused(self, checked: bool) -> None:
         self.paused = checked
+        if checked:
+            self.press_region = None
+            self.local_pointer = None
+            if self.animations.pet_held:
+                self.animations.release_pet()
         self.refresh_activity()
         self.save_preferences()
 

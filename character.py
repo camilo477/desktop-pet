@@ -35,6 +35,16 @@ def polygon(points):
     return path
 
 
+def cubic_points(node):
+    data = node.get('d', '')
+    values = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', data)]
+    commands = re.findall('[A-Za-z]', data)
+    count = (len(values) - 2) // 6
+    if commands != ['M'] + ['C'] * count + ['Z'] or len(values) != 2 + count * 6:
+        raise RuntimeError('Silhouettes must use absolute M/C/Z curves.')
+    return list(zip(values[::2], values[1::2]))
+
+
 class CatArt:
     def __init__(self):
         path = Path(__file__).resolve().parent / 'assets' / 'cat' / 'miga.svg'
@@ -50,15 +60,17 @@ class CatArt:
             node = elements[name]
             if node.tag.endswith('g'):
                 node = next(iter(node))
-            data = node.get('d', '')
-            values = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', data)]
-            commands = re.findall('[A-Za-z]', data)
-            count = (len(values) - 2) // 6
-            if commands != ['M'] + ['C'] * count + ['Z'] or len(values) != 2 + count * 6:
-                raise RuntimeError('Silhouettes must use absolute M/C/Z curves.')
-            self.shapes[name] = list(zip(values[::2], values[1::2]))
+            self.shapes[name] = cubic_points(node)
+        self.hits = []
         self.head_hit_paths = []
-        self.head_center = 101.0
+        self.paw_path = curve(cubic_points(elements['paw'][0]))
+        self.feet_path = QPainterPath()
+        for node in elements['hind-feet']:
+            self.feet_path.addPath(curve(cubic_points(node)))
+        self.mouse_path = curve(cubic_points(elements['mouse'][0])).united(
+            curve(cubic_points(elements['mouse'][1])))
+        board = polygon(BOARD)
+        self.board_path = board.united(board.translated(0, 2 * KEYBOARD_SCALE))
         self.head_position = QPointF(103, 76.5)
         self.layers = {}
         self.cache_scale = 0.0
@@ -143,6 +155,7 @@ class CatArt:
     def _body(self, p, body):
         p.setBrush(self.fur); p.setPen(Qt.PenStyle.NoPen)
         outline = curve([body.map(x, y) for x, y in self.shapes['body']])
+        self.hits.append(('torso', outline))
         p.drawPath(outline)
         p.save(); p.setClipPath(outline)
         for name, color in self.body_tones.items():
@@ -163,8 +176,16 @@ class CatArt:
             x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
             y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
             y += (pose.tail_tip + pose.motion.tip) * weight * weight
+            if pose.tail_touch:
+                # The bend travels around the curl, with the strongest lift at its tip.
+                phase = max(0, min(1, (pose.tail_touch - .17 * weight) / .83))
+                bend = math.sin(math.pi * phase) ** 2 * weight
+                x -= 4.4 * bend
+                y -= (5 + 2 * math.sin(math.tau * phase)) * bend
             warped.append(body.map(x, y))
-        p.drawPath(curve(warped))
+        outline = curve(warped)
+        self.hits.append(('tail', outline))
+        p.drawPath(outline)
 
     @staticmethod
     def shoulder(side, pose):
@@ -218,12 +239,16 @@ class CatArt:
         path.closeSubpath(); p.setPen(Qt.PenStyle.NoPen)
         tone = round(pose.groom * 20) if side < 0 else 0
         p.setBrush(self.foreleg.lighter(100 + tone) if tone else self.foreleg)
+        self.hits.append(('paw', path))
         p.drawPath(path)
 
+    def region_at(self, point):
+        return next((region for region, path in reversed(self.hits) if path.contains(point)), None)
+
     def head_hit(self, point):
-        if not any(path.contains(point) for path in self.head_hit_paths):
+        if self.region_at(point) != 'head':
             return None
-        return max(-1, min(1, (point.x() - self.head_center) / 30))
+        return max(-1, min(1, (point.x() - self.head_position.x()) / 30))
 
     def _head(self, p, pose, body):
         face = FaceGeometry(pose, body)
@@ -234,9 +259,7 @@ class CatArt:
             transform = QTransform.fromTranslate(offset.x(), offset.y())
             p.drawPixmap(offset, image)
             self.head_hit_paths = [transform.map(path) for path in paths]
-            self.head_center = face.cx
             return
-        self.head_center = face.cx
         self.head_hit_paths = []
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.head_fur)
         for side, name in ((-1, 'ear-left'), (1, 'ear-right')):
@@ -324,6 +347,7 @@ class CatArt:
     def draw(self, p, pose):
         p.save(); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         body = BodyGeometry(pose)
+        self.hits.clear()
         self._tail(p, pose, body)
         p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
         if pose.scroll > .01:
@@ -332,9 +356,12 @@ class CatArt:
             step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
             p.drawLine(QPointF(step, -.6), QPointF(step, .6))
         p.restore()
+        self.hits.append(('mouse', self.mouse_path.translated(pose.mouse_dx, pose.mouse_dy + pose.click * .4)))
         self.layer(p, 'hind-feet')
+        self.hits.append(('paw', self.feet_path))
         self._body(p, body)
         p.drawPixmap(0, 0, self.keyboard)
+        self.hits.append(('keyboard', self.board_path))
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():
             key = self.keys[identifier]
@@ -344,17 +371,21 @@ class CatArt:
             self._arm(p, pose, -1, body)
         self._arm(p, pose, 1, body)
         self._head(p, pose, body)
+        self.hits.extend(zip(('ear-left', 'ear-right', 'head'), self.head_hit_paths))
         if washing_face:
             self._arm(p, pose, -1, body)
         for side in (-1, 1):
             x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
             reach = body.mouse_reach if side < 0 else 0
-            p.save(); p.translate(x, y); p.rotate(-14 * reach)
+            transform = QTransform.fromTranslate(x, y)
+            transform.rotate(-14 * reach)
             pressure = pose.left_pressure if side < 0 else pose.right_pressure
-            p.scale(1 + pressure * .035, 1 - pressure * .10)
+            transform.scale(1 + pressure * .035, 1 - pressure * .10)
             if pose.motion.content and not pose.pressed and pose.mouse < .01:
                 planted = pose.motion.content * smoothstep((y - 153) / 4)
-                p.scale(1 + .16 * planted, 1 - .13 * planted)
-            p.translate(-reach, mix(-3.5, 0, reach))
+                transform.scale(1 + .16 * planted, 1 - .13 * planted)
+            transform.translate(-reach, mix(-3.5, 0, reach))
+            self.hits.append(('paw', transform.map(self.paw_path)))
+            p.save(); p.setTransform(transform, True)
             self.layer(p, 'paw'); p.restore()
         self._zzz(p, pose); p.restore()
