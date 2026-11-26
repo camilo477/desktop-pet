@@ -8,9 +8,10 @@ EAR_ANCHORS = {-1: (82, 57), 1: (125, 57)}
 
 class BodyGeometry:
     def __init__(self, pose):
-        self.x = pose.balance_x + pose.contact_side * pose.contact * .45
+        self.lift = pose.lift
+        self.x = pose.balance_x + pose.sway_x + pose.contact_side * pose.contact * .45
         contact_dip = pose.contact * (1.25 + max(0, pose.expression.opening - 1) * 2)
-        self.y = (pose.balance_y + pose.relax * 1.2 - pose.breath * .55
+        self.y = (pose.balance_y + pose.sway_y + pose.relax * 1.2 - pose.breath * .55
                   + pose.pet * 1.1 + contact_dip)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
         self.mouse_reach = pose.mouse
@@ -23,7 +24,7 @@ class BodyGeometry:
         if self.shoulder_roll:
             drop += self.shoulder_roll * max(-1, min(1, (x - 104) / 18))
         return (104 + (x - 104) * (1 + (self.breadth - 1) * weight) + self.x * weight,
-                y + drop * weight)
+                y + drop * weight - self.lift)
 
     @property
     def hips(self):

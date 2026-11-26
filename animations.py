@@ -60,6 +60,9 @@ class Pose:
     balance_x: float = 0.0
     balance_y: float = 0.0
     balance_velocity: float = 0.0
+    lift: float = 0.0
+    sway_x: float = 0.0
+    sway_y: float = 0.0
     left_x: float = LEFT_REST[0]
     left_y: float = LEFT_REST[1]
     right_x: float = RIGHT_REST[0]
@@ -167,9 +170,13 @@ class Animations:
         self.pet_held = False
         self.pet_release = None
         self.pet_release_level = 0.0
+        self.pet_fade = .60
         self.ear_touches = [-math.inf, -math.inf]
         self.tail_touch_start = -math.inf
         self.near_face = False
+        self.carried = False
+        self.lift_start = self.release_stamp = -math.inf
+        self.lift_velocity = self.sway_vx = self.sway_vy = 0.0
         self.sleep_goal = 0.0
         self.next_idle = IDLE_ACTION_AFTER + random.uniform(1, 8)
         self.action_kind = None
@@ -200,10 +207,11 @@ class Animations:
         self.tail_start = self.time
         self.next_tail = self.time + random.uniform(10, 20)
 
-    def release_pet(self):
+    def release_pet(self, quick=False):
         self.pet_held = False
-        self.pet_release = self.time
+        self.pet_release = self.time + (0 if quick else .10)
         self.pet_release_level = self.pose.pet
+        self.pet_fade = .16 if quick else .60
 
     def touch(self, region):
         self.interact()
@@ -213,6 +221,42 @@ class Animations:
                 self.ear_touches[index] = self.time
         elif region == 'tail' and self.time - self.tail_touch_start >= .58:
             self.tail_touch_start = self.time
+
+    def lift(self):
+        self.interact()
+        self.carried = True
+        self.lift_start = self.time
+        if self.pet_held or self.pose.pet or self.time - self.pet_start < .78:
+            self.release_pet(quick=True)
+        self.mouse_target[:] = (self.pose.mouse_dx, self.pose.mouse_dy)
+        self.mouse_velocity[:] = (0.0, 0.0)
+        self.mouse_contact = False
+        for paw in self.paws:
+            paw.key = paw.ready = None
+
+    def put_down(self, now):
+        self.carried = False
+        self.release_stamp = self.last_hint = now
+        # A small compression proportional to how far the haunches actually rose.
+        self.lift_velocity = -26 * max(0, self.pose.lift)
+        self.interact()
+
+    def _suspension(self, dt, delta):
+        pose = self.pose
+        if not (self.carried or pose.lift or pose.sway_x or pose.sway_y):
+            return
+        horizontal = vertical = 0.0
+        if self.carried:
+            travel = max(dt, 1 / 120) * 690
+            horizontal = -6.2 * math.tanh(delta[0] / travel)
+            vertical = -3.4 * math.tanh(delta[1] / travel)
+        pose.lift, self.lift_velocity = spring(pose.lift, self.lift_velocity,
+                                               6.5 if self.carried else 0, 13, dt)
+        pose.sway_x, self.sway_vx = spring(pose.sway_x, self.sway_vx, horizontal, 16, dt)
+        pose.sway_y, self.sway_vy = spring(pose.sway_y, self.sway_vy, vertical, 16, dt)
+        if not self.carried and max(abs(pose.lift), abs(pose.sway_x), abs(pose.sway_y)) < .005:
+            pose.lift = pose.sway_x = pose.sway_y = 0.0
+            self.lift_velocity = self.sway_vx = self.sway_vy = 0.0
 
     def clear_input(self):
         # Clear the input estimates immediately, keeping the painted pose for the transition.
@@ -285,8 +329,8 @@ class Animations:
         age = t - self.pet_start
         if self.pet_release is not None:
             elapsed = t - self.pet_release
-            pose.pet = self.pet_release_level * (1 - smoothstep((elapsed - .10) / .60))
-            if elapsed >= .70:
+            pose.pet = self.pet_release_level * (1 - smoothstep(elapsed / self.pet_fade))
+            if elapsed >= self.pet_fade:
                 self.pet_release = None
                 self.pet_start = -10.0
         elif self.pet_held:
@@ -375,8 +419,12 @@ class Animations:
             self.mouse_velocity[axis] = velocity
         pose.mouse_dx, pose.mouse_dy = positions
 
-    def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0), face_offset=None):
+    def advance(self, dt, now=0.0, activity=Activity(), gaze=(0.0, 0.0), face_offset=None,
+                drag_delta=(0.0, 0.0)):
         pose = self.pose
+        if self.carried:
+            self.interact()
+        self._suspension(dt, drag_delta)
         observed = max(activity.keyboard, activity.mouse, activity.click, activity.scroll)
         if self.last_activity is None:
             self.last_activity = now
@@ -422,6 +470,12 @@ class Animations:
         if pose.tail_touch:
             expression = expression.blend(SURPRISED, .35 * math.sin(math.pi * tail_phase) ** 2)
         expression = expression.blend(CURIOUS, abs(ear_lean) * .6)
+        if self.carried or pose.lift > .01:
+            age = self.time - self.lift_start
+            surprise = smoothstep(age / .10) * (1 - smoothstep((age - .14) / .38))
+            if not self.carried:
+                surprise *= min(1, pose.lift / 6.5)
+            expression = expression.blend(SURPRISED, .65 * surprise)
         pose.expression = expression
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
@@ -445,12 +499,12 @@ class Animations:
         # A flexible tip moves in bouts; the root stays planted.
         bout = (.5 - .5 * math.cos(self.tip_phase / 3))
         pose.tail_tip = expression.tail * math.sin(self.tip_phase) * bout * (1 - pose.sleep)
-        mouse_active = now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
+        mouse_active = not self.carried and now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 10, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 12, dt)
         self._mouse_motion(dt, activity, mouse_active)
         age = now - activity.click
-        pose.click = math.sin(math.pi * age / .18) if 0 <= age < .18 else 0
+        pose.click = math.sin(math.pi * age / .18) if not self.carried and 0 <= age < .18 else 0
         if activity.scroll_x or activity.scroll_y:
             pose.scroll_direction = math.copysign(1, activity.scroll_y or activity.scroll_x)
             pose.scroll = min(1, pose.scroll + abs(activity.scroll_y or activity.scroll_x) * .4)
@@ -460,17 +514,23 @@ class Animations:
         pose.contacts = tuple((key, pressure * math.exp(-dt * 24)) for key, pressure in pose.contacts
                               if pressure * math.exp(-dt * 24) > .025)
         pose.pressed = activity.pressed
-        self._assign(now, activity, mouse_active)
+        if not self.carried:
+            self._assign(now, activity, mouse_active)
         goals = [BY_ID[paw.key].contact for paw in self.paws if paw.key in BY_ID]
-        key_point = BY_ID[activity.latest.identifier].contact if activity.latest.identifier in BY_ID else (goals[-1] if goals else None)
+        key_point = goals[-1] if goals else None
+        if (not self.carried and activity.latest.identifier in BY_ID
+                and activity.latest.stamp > self.release_stamp):
+            key_point = BY_ID[activity.latest.identifier].contact
         if key_point:
             points = [BY_ID[hint.identifier].contact for hint in activity.hints
-                      if hint.identifier in BY_ID and now - hint.stamp < .16]
+                      if hint.identifier in BY_ID and hint.stamp > self.release_stamp and now - hint.stamp < .16]
             self.focus_point[:] = tuple(sum(point[axis] for point in points) / len(points) for axis in (0, 1)) if points else key_point
         pose.focus = approach(pose.focus, (0.2 if mouse_active else 1) if key_point else 0, 12, dt)
         moving = now - activity.mouse < .60
         scrolling = now - activity.scroll < MOUSE_HOLD
-        if curious:
+        if self.carried:
+            look = (pose.sway_x * .045, .16 + pose.sway_y * .04)
+        elif curious:
             look = (face_offset[0] / 48, face_offset[1] / 43)
         elif self.near_face and key_point and activity.keyboard >= max(activity.mouse, activity.scroll):
             look = ((self.focus_point[0] - 116) / 72, .95)
@@ -506,7 +566,7 @@ class Animations:
         pose.head_y, self.head_velocity[1] = spring(pose.head_y, self.head_velocity[1], look[1], head_speed, dt)
         toward = max(-1, min(1, look[0] * 1.8))
         tilt = look[0] * 3.5 + toward * expression.tilt + pose.pet_side * pose.pet * 8
-        tilt += ear_lean * 3
+        tilt += ear_lean * 3 + pose.sway_x * .68
         if playing and self.action_kind == 'look':
             tilt += self.look_side * action * 2
         pose.head_tilt, self.head_velocity[2] = spring(pose.head_tilt, self.head_velocity[2], tilt, 14, dt)
@@ -535,15 +595,18 @@ class Animations:
         spread = expression.ears + motion.ears
         pose.ear_left += (swivel - spread) * (1 - pose.sleep) + pose.balance_velocity * .013
         pose.ear_right += (swivel + spread) * (1 - pose.sleep) + pose.balance_velocity * .009
-        pose.ear_left += motion.swivel * (.2 if motion.rub and pose.action_side > 0 else 1)
-        pose.ear_right += motion.swivel * (.2 if motion.rub and pose.action_side < 0 else 1)
+        pose.ear_left += motion.swivel * (.2 if motion.rub and pose.action_side > 0 else 1) + pose.sway_x * .8
+        pose.ear_right += motion.swivel * (.2 if motion.rub and pose.action_side < 0 else 1) + pose.sway_x * .7
         body = BodyGeometry(pose)
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
             rest = LEFT_REST if index == 0 else RIGHT_REST
             side = -1 if index == 0 else 1
             offset = motion.left if index == 0 else motion.right
-            if index == MOUSE_PAW and mouse_active:
+            if self.carried:
+                sx, sy = body.shoulder(side)
+                paw.aim('lift', (sx - side * 6 + pose.sway_x * .45, sy + 25 + index * 2))
+            elif index == MOUSE_PAW and mouse_active:
                 paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in BY_ID:
                 point = BY_ID[paw.key].contact

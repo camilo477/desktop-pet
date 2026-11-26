@@ -78,6 +78,7 @@ class ActivityMonitor:
         self._wheel = [0.0, 0.0]
         self._new_presses = 0
         self._pointer_distance = self._wheel_distance = 0.0
+        self._dragging = False
         self._wake_callback = wake_callback
         self._notice_pending = False
 
@@ -267,7 +268,7 @@ class ActivityMonitor:
                 self._local_position = position
             else:
                 self._global_position = position
-            if previous is None:
+            if previous is None or self._dragging:
                 return
             if (local and self.global_input and len(self._listeners) > 1
                     and self._listeners[1].is_alive() and self._global_position is not None):
@@ -278,6 +279,15 @@ class ActivityMonitor:
             self._motion[1] = max(-240, min(240, self._motion[1] + dy))
             self._activity = replace(self._activity, mouse=time.monotonic())
             self._notify()
+
+    def set_dragging(self, dragging):
+        # Keep each listener's last coordinate current while the window moves.
+        # The next genuine movement then starts at the release position.
+        with self._lock:
+            self._dragging = dragging
+            self._motion[:] = (0.0, 0.0)
+            self._pointer_distance = 0.0
+            self._activity = replace(self._activity, mouse=-math.inf)
 
     def pointer_click(self):
         with self._lock:

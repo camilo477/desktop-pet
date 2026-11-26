@@ -182,6 +182,9 @@ class CatArt:
                 bend = math.sin(math.pi * phase) ** 2 * weight
                 x -= 4.4 * bend
                 y -= (5 + 2 * math.sin(math.tau * phase)) * bend
+            if pose.lift or pose.sway_x or pose.sway_y:
+                x += pose.sway_x * .65 * weight
+                y += (pose.sway_y * .8 - pose.lift * .38) * weight
             warped.append(body.map(x, y))
         outline = curve(warped)
         self.hits.append(('tail', outline))
@@ -357,8 +360,9 @@ class CatArt:
             p.drawLine(QPointF(step, -.6), QPointF(step, .6))
         p.restore()
         self.hits.append(('mouse', self.mouse_path.translated(pose.mouse_dx, pose.mouse_dy + pose.click * .4)))
-        self.layer(p, 'hind-feet')
-        self.hits.append(('paw', self.feet_path))
+        p.save(); p.translate(0, -pose.lift)
+        self.layer(p, 'hind-feet'); p.restore()
+        self.hits.append(('paw', self.feet_path.translated(0, -pose.lift)))
         self._body(p, body)
         p.drawPixmap(0, 0, self.keyboard)
         self.hits.append(('keyboard', self.board_path))
