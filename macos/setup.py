@@ -86,7 +86,7 @@ def install(source):
         stage = Path(tmp)
         if source:
             info = check_bundle(source)
-            minimum = info.get('LSMinimumSystemVersion', '14.4')
+            minimum = info.get('LSMinimumSystemVersion', '15.0')
             if version(platform.mac_ver()[0]) < version(minimum):
                 raise ValueError(f'This bundle requires macOS {minimum} or later.')
             app = stage / 'Miga.app'
@@ -169,8 +169,8 @@ def main():
             with installation_lock():
                 uninstall()
         return
-    if platform.machine() not in ('arm64', 'x86_64') or version(platform.mac_ver()[0]) < (14, 4, 0):
-        raise ValueError('Miga requires macOS 14.4 or later on Apple Silicon or Intel.')
+    if platform.machine() not in ('arm64', 'x86_64') or version(platform.mac_ver()[0]) < (15, 0, 0):
+        raise ValueError('Miga requires macOS 15 or later on Apple Silicon or Intel.')
     translated = subprocess.run(['/usr/sbin/sysctl', '-in', 'sysctl.proc_translated'],
                                 capture_output=True, text=True)
     if translated.stdout.strip() == '1':

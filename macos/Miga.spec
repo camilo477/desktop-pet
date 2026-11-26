@@ -14,7 +14,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Miga', console=False,
 coll = COLLECT(exe, a.binaries, a.datas, name='Miga', upx=False)
 # Local Python distributions can require a newer OS than the Qt wheels.
 # Inspect the thinned native binaries before signing the final bundle.
-minimum = (14, 4, 0)
+minimum = (15, 0, 0)
 for binary in Path(coll.name).rglob('*'):
     if binary.is_symlink() or not binary.is_file():
         continue
