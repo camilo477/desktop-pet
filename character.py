@@ -11,7 +11,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 from animations import Pose, mix, smoothstep
 from anatomy import BodyGeometry, FaceGeometry
-from keyboard_layout import BOARD, KEYS, KEYBOARD_SCALE, KEY_TRAVEL, LABELS
+from keyboard_layout import Keyboard, KEYBOARD_SCALE, KEY_TRAVEL
 from personality import DROWSY
 
 BODY_TONES = ('neck-shade', 'chest-volume', 'hip-left', 'hip-right')
@@ -46,7 +46,7 @@ def cubic_points(node):
 
 
 class CatArt:
-    def __init__(self):
+    def __init__(self, keyboard=None):
         path = Path(__file__).resolve().parent / 'assets' / 'cat' / 'miga.svg'
         self.renderer = QSvgRenderer(str(path))
         if not self.renderer.isValid():
@@ -69,16 +69,12 @@ class CatArt:
             self.feet_path.addPath(curve(cubic_points(node)))
         self.mouse_path = curve(cubic_points(elements['mouse'][0])).united(
             curve(cubic_points(elements['mouse'][1])))
-        board = polygon(BOARD)
-        self.board_path = board.united(board.translated(0, 2 * KEYBOARD_SCALE))
         self.head_position = QPointF(103, 76.5)
         self.layers = {}
         self.cache_scale = 0.0
-        self.layout = 'us'
         self.keyboard = QPixmap()
         self.sleep_face = None
-        self.keys = {key.identifier: key for key in KEYS}
-        self.key_paths = {key.identifier: polygon(key.polygon) for key in KEYS}
+        self.set_keyboard(keyboard or Keyboard())
         # SVG colors are shared by cached artwork and procedural surfaces.
         self.fur = QColor(elements['body'].get('fill'))
         self.head_fur = QColor(elements['head-shape'].get('fill'))
@@ -94,14 +90,18 @@ class CatArt:
         font = QFont('sans-serif'); font.setPixelSize(9); font.setWeight(QFont.Weight.DemiBold)
         self.z_path = QPainterPath(); self.z_path.addText(QPointF(0, 0), font, 'Z')
 
-    def set_layout(self, layout):
-        layout = layout if layout in LABELS else 'us'
-        if layout != self.layout:
-            self.layout = layout
-            self.cache_scale = 0
+    def set_keyboard(self, keyboard):
+        self.model = keyboard
+        self.key_paths = {key.identifier: polygon(key.polygon) for key in keyboard.by_id.values()}
+        self.board_top = polygon(keyboard.board)
+        self.board_path = self.board_top.united(self.board_top.translated(0, 2 * KEYBOARD_SCALE))
+        self.keyboard_cache = None
 
     def cache(self, size, pixel_ratio):
         scale = math.ceil(size * pixel_ratio) / 200
+        if self.keyboard_cache != (scale, self.model.layout):
+            self._cache_keyboard(scale)
+            self.keyboard_cache = (scale, self.model.layout)
         if scale == self.cache_scale:
             return
         self.cache_scale = scale
@@ -116,15 +116,6 @@ class CatArt:
             p.scale(scale, scale); p.translate(-origin.x(), -origin.y())
             self.renderer.render(p, name, bounds); p.end(); image.setDevicePixelRatio(scale)
             self.layers[name] = origin, image
-        self.keyboard = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
-        self.keyboard.fill(Qt.GlobalColor.transparent)
-        p = QPainter(self.keyboard); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#647078'))
-        p.save(); p.translate(0, 2 * KEYBOARD_SCALE); p.drawPath(polygon(BOARD)); p.restore()
-        p.setBrush(QColor('#929ea2')); p.drawPath(polygon(BOARD))
-        for key in KEYS:
-            self.draw_key(p, key, False, scale)
-        p.end(); self.keyboard.setDevicePixelRatio(scale)
         self.sleep_face = None
         image = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
         image.fill(Qt.GlobalColor.transparent)
@@ -133,12 +124,23 @@ class CatArt:
         self._head(p, resting, BodyGeometry(resting)); p.end(); image.setDevicePixelRatio(scale)
         self.sleep_face = image, self.head_position, self.head_hit_paths[:]
 
+    def _cache_keyboard(self, scale):
+        self.keyboard = QPixmap(math.ceil(200 * scale), math.ceil(200 * scale))
+        self.keyboard.fill(Qt.GlobalColor.transparent)
+        p = QPainter(self.keyboard); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.scale(scale, scale)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#647078'))
+        p.save(); p.translate(0, 2 * KEYBOARD_SCALE); p.drawPath(self.board_top); p.restore()
+        p.setBrush(QColor('#929ea2')); p.drawPath(self.board_top)
+        for key in self.model.by_id.values():
+            self.draw_key(p, key, False, scale)
+        p.end(); self.keyboard.setDevicePixelRatio(scale)
+
     def draw_key(self, p, key, down, scale, pressure=0.0):
         p.save(); p.translate(0, (KEY_TRAVEL if down else 0) + pressure * .45 * KEYBOARD_SCALE)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#829294' if down else '#ccd2ce'))
         p.drawPath(self.key_paths[key.identifier])
-        label = LABELS.get(self.layout, {}).get(key.identifier, key.label)
-        if scale >= 1.4 and label:
+        label = self.model.label(key.identifier)
+        if scale >= 1 and label:
             font = QFont('sans-serif'); font.setPixelSize(3)
             p.setFont(font); p.setPen(QColor('#39454b'))
             x, y, ux, uy, vx, vy = key.label_basis
@@ -352,14 +354,15 @@ class CatArt:
         body = BodyGeometry(pose)
         self.hits.clear()
         self._tail(p, pose, body)
-        p.save(); p.translate(pose.mouse_dx, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
+        mouse_x = self.model.mouse_offset + pose.mouse_dx
+        p.save(); p.translate(mouse_x, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
         if pose.scroll > .01:
             p.translate(self.wheel_center); p.rotate(-77)
             p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
             p.drawLine(QPointF(step, -.6), QPointF(step, .6))
         p.restore()
-        self.hits.append(('mouse', self.mouse_path.translated(pose.mouse_dx, pose.mouse_dy + pose.click * .4)))
+        self.hits.append(('mouse', self.mouse_path.translated(mouse_x, pose.mouse_dy + pose.click * .4)))
         p.save(); p.translate(0, -pose.lift)
         self.layer(p, 'hind-feet'); p.restore()
         self.hits.append(('paw', self.feet_path.translated(0, -pose.lift)))
@@ -368,7 +371,7 @@ class CatArt:
         self.hits.append(('keyboard', self.board_path))
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():
-            key = self.keys[identifier]
+            key = self.model.by_id[identifier]
             self.draw_key(p, key, identifier in pose.pressed, self.cache_scale, pressures.get(identifier, 0))
         washing_face = pose.action == 'wash' and pose.groom > .01
         if not washing_face:

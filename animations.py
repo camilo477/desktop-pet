@@ -5,14 +5,11 @@ import math
 import random
 
 from activity import Activity, KeyHint
-from keyboard_layout import BY_ID, KEY_TRAVEL
+from keyboard_layout import Keyboard, KEY_TRAVEL, REST
 from anatomy import BodyGeometry, FaceGeometry
 from idle_motion import DURATIONS, QUIET, STILL, IdleMotion, sample, smoothstep
 from personality import CALM, CONTENT, CURIOUS, SURPRISED, Expression, Personality
 
-LEFT_REST = (91.0, 157.0)
-RIGHT_REST = (115.0, 157.0)
-MOUSE_REST = (36.5, 153.5)  # Paw contact on the palm end of the shell.
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
 IDLE_ACTION_AFTER = 15.0
@@ -63,10 +60,10 @@ class Pose:
     lift: float = 0.0
     sway_x: float = 0.0
     sway_y: float = 0.0
-    left_x: float = LEFT_REST[0]
-    left_y: float = LEFT_REST[1]
-    right_x: float = RIGHT_REST[0]
-    right_y: float = RIGHT_REST[1]
+    left_x: float = REST[0][0]
+    left_y: float = REST[0][1]
+    right_x: float = REST[1][0]
+    right_y: float = REST[1][1]
     left_key: str | None = None
     right_key: str | None = None
     pressed: frozenset[str] = frozenset()
@@ -113,10 +110,10 @@ class Paw:
     distance: float = 0.0
     ready: tuple[float, float] | None = None
 
-    def aim(self, goal, point, stamp=0.0, interval=.33):
+    def aim(self, goal, point, stamp=0.0, interval=.33, keystroke=False):
         if self.goal != goal or self.motion_stamp != stamp:
             distance = math.hypot(point[0] - self.x, point[1] - self.y)
-            if goal in BY_ID:
+            if keystroke:
                 travel = max(.042, min(.12, interval * .12 + distance / 1450))
                 self.response = 4.3 / travel
                 tempo = max(0, min(1, (.33 - interval) / .26))
@@ -143,13 +140,14 @@ class Paw:
 
 
 class Animations:
-    def __init__(self):
-        self.pose = Pose()
+    def __init__(self, keyboard=None):
+        self.keyboard = keyboard or Keyboard()
+        self.pose = Pose(left_x=self.keyboard.rest[0][0], right_x=self.keyboard.rest[1][0])
         self.personality = Personality()
         self.tip_phase = 0.0
         self.breath_phase = 0.0
         self.time = 0.0
-        self.paws = [Paw(*LEFT_REST), Paw(*RIGHT_REST)]
+        self.paws = [Paw(*point) for point in self.keyboard.rest]
         self.last_activity = None
         self.touch_pending = False
         self.last_hint = -math.inf
@@ -258,6 +256,31 @@ class Animations:
             pose.lift = pose.sway_x = pose.sway_y = 0.0
             self.lift_velocity = self.sway_vx = self.sway_vy = 0.0
 
+    def set_keyboard(self, keyboard, held):
+        old = self.keyboard
+        self.keyboard = keyboard
+        pose = self.pose
+        pose.pressed = held
+        pose.contacts = ()
+        pose.contact = pose.left_pressure = pose.right_pressure = 0
+        self.mouse_contact = False
+        self.mouse_target[:] = (pose.mouse_dx, pose.mouse_dy)
+        self.mouse_velocity[:] = (0, 0)
+        for index, paw in enumerate(self.paws):
+            if paw.goal == 'rest' and math.dist((paw.x, paw.y), old.rest[index]) < .1:
+                paw.x, paw.y = keyboard.rest[index]
+            if paw.key not in held:
+                paw.key = None
+                paw.until = -math.inf
+            if paw.goal in old.by_id or paw.goal == 'ready':
+                paw.goal = 'redirect'
+                paw.target = None
+            paw.ready = None
+            paw.pressure = 0
+        pose.left_key, pose.right_key = (paw.key for paw in self.paws)
+        pose.left_x, pose.left_y = self.paws[0].x, self.paws[0].y
+        pose.right_x, pose.right_y = self.paws[1].x, self.paws[1].y
+
     def clear_input(self):
         # Clear the input estimates immediately, keeping the painted pose for the transition.
         self.personality = Personality(self.personality.shape)
@@ -293,16 +316,16 @@ class Animations:
             if index not in available or (paw.key not in activity.held and now > paw.until):
                 paw.key = None
         hints = {hint.identifier: hint for hint in (*activity.hints, activity.latest)
-                 if hint.identifier in BY_ID and hint.stamp > self.last_hint}
+                 if hint.identifier in self.keyboard.by_id and hint.stamp > self.last_hint}
         for hint in sorted(hints.values(), key=lambda value: value.stamp):
-            key = BY_ID[hint.identifier]
+            key = self.keyboard.by_id[hint.identifier]
             existing = next((i for i in available if self.paws[i].key == key.identifier), None)
             if existing is None:
                 preferred = key.preferred_paw
                 def score(index):
                     paw = self.paws[index]
                     held = paw.key in activity.held
-                    modifier = held and BY_ID[paw.key].modifier
+                    modifier = held and self.keyboard.by_id[paw.key].modifier
                     return (50 if modifier else 28 if held else 0) + (0 if index == preferred else 5) + math.hypot(paw.x - key.contact[0], paw.y - key.contact[1]) * .1
                 existing = min(available, key=score)
                 if len(available) == 1 and key.modifier and self.paws[existing].key in activity.held:
@@ -314,15 +337,20 @@ class Animations:
             contact = max(.075, min(.18, activity.key_interval * .55))
             paw.until = max(hint.stamp + contact, now + .04)
             self.last_hint = max(self.last_hint, hint.stamp)
-        assigned = {self.paws[i].key for i in available if self.paws[i].key}
-        for index in available:
-            paw = self.paws[index]
-            if paw.key is None:
-                candidates = activity.held - assigned
-                if candidates:
-                    paw.key = min(candidates, key=lambda identifier: (BY_ID[identifier].modifier,
-                                   math.hypot(BY_ID[identifier].contact[0] - paw.x, BY_ID[identifier].contact[1] - paw.y)))
-                    paw.stamp = 0.0; assigned.add(paw.key)
+        if activity.held:
+            candidates = (activity.held & self.keyboard.ids) - {self.paws[i].key for i in available}
+            free = [i for i in available if self.paws[i].key is None]
+            # A still-held key may reappear after changing boards, without a new press.
+            while free and candidates:
+                def rank(pair):
+                    i, identifier = pair
+                    key = self.keyboard.by_id[identifier]
+                    dist = math.dist((self.paws[i].x, self.paws[i].y), key.contact)
+                    return (key.modifier, i != key.preferred_paw, dist, identifier)
+                i, identifier = min(((i, key) for i in free for key in candidates), key=rank)
+                self.paws[i].key, self.paws[i].stamp = identifier, 0.0
+                free.remove(i)
+                candidates = candidates - {identifier}
 
     def _expressions(self, dt, idle, active):
         t, pose = self.time, self.pose
@@ -513,17 +541,17 @@ class Animations:
         pose.contact = approach(pose.contact, 0, 17, dt)
         pose.contacts = tuple((key, pressure * math.exp(-dt * 24)) for key, pressure in pose.contacts
                               if pressure * math.exp(-dt * 24) > .025)
-        pose.pressed = activity.pressed
+        pose.pressed = activity.pressed & self.keyboard.ids
         if not self.carried:
             self._assign(now, activity, mouse_active)
-        goals = [BY_ID[paw.key].contact for paw in self.paws if paw.key in BY_ID]
+        goals = [self.keyboard.by_id[paw.key].contact for paw in self.paws if paw.key in self.keyboard.by_id]
         key_point = goals[-1] if goals else None
-        if (not self.carried and activity.latest.identifier in BY_ID
+        if (not self.carried and activity.latest.identifier in self.keyboard.by_id
                 and activity.latest.stamp > self.release_stamp):
-            key_point = BY_ID[activity.latest.identifier].contact
+            key_point = self.keyboard.by_id[activity.latest.identifier].contact
         if key_point:
-            points = [BY_ID[hint.identifier].contact for hint in activity.hints
-                      if hint.identifier in BY_ID and hint.stamp > self.release_stamp and now - hint.stamp < .16]
+            points = [self.keyboard.by_id[hint.identifier].contact for hint in activity.hints
+                      if hint.identifier in self.keyboard.by_id and hint.stamp > self.release_stamp and now - hint.stamp < .16]
             self.focus_point[:] = tuple(sum(point[axis] for point in points) / len(points) for axis in (0, 1)) if points else key_point
         pose.focus = approach(pose.focus, (0.2 if mouse_active else 1) if key_point else 0, 12, dt)
         moving = now - activity.mouse < .60
@@ -539,7 +567,7 @@ class Animations:
             if key_point and activity.held:
                 look = (gaze[0] * .9 + (self.focus_point[0] - 118) / 70 * .1, gaze[1] * .9 + .07)
         elif scrolling:
-            look = (-.72 + pose.mouse_dx / 120, .78)
+            look = (-.72 + (self.keyboard.mouse_offset + pose.mouse_dx) / 120, .78)
         elif key_point:
             look = ((self.focus_point[0] - 116) / 72, .95)
         elif playing and self.action_kind == 'look':
@@ -577,7 +605,7 @@ class Animations:
             target_x, target_y = look[0] * 1.2, 0
         if mouse_active:
             # Follow the planted paw with the chest; the opposite paw can still type.
-            mouse_lean = -15 + pose.mouse_dx * .55
+            mouse_lean = -15 + (self.keyboard.mouse_offset + pose.mouse_dx) * .55
             target_x = mix(mouse_lean, target_x, .18) if key_point else mouse_lean
             target_y = max(target_y, 10 + pose.mouse_dy * .32)
         target_x += motion.lean
@@ -600,17 +628,17 @@ class Animations:
         body = BodyGeometry(pose)
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
-            rest = LEFT_REST if index == 0 else RIGHT_REST
+            rest = self.keyboard.rest[index]
             side = -1 if index == 0 else 1
             offset = motion.left if index == 0 else motion.right
             if self.carried:
                 sx, sy = body.shoulder(side)
                 paw.aim('lift', (sx - side * 6 + pose.sway_x * .45, sy + 25 + index * 2))
             elif index == MOUSE_PAW and mouse_active:
-                paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
-            elif paw.key in BY_ID:
-                point = BY_ID[paw.key].contact
-                paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval)
+                paw.aim('mouse', (self.keyboard.mouse_rest[0] + pose.mouse_dx, self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4))
+            elif paw.key in self.keyboard.by_id:
+                point = self.keyboard.by_id[paw.key].contact
+                paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval, keystroke=True)
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
             elif playing and self.action_kind in ('lick', 'wash') and index == 0:
                 paw.aim('groom', face.grooming_target(self.action_kind, phase))
@@ -626,14 +654,14 @@ class Animations:
             paw.advance(dt)
             paw.x, paw.y = body.reachable(-1 if index == 0 else 1, (paw.x, paw.y))
             if index == MOUSE_PAW and mouse_active:
-                x, y = MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4
+                x, y = self.keyboard.mouse_rest[0] + pose.mouse_dx, self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4
                 reachable = math.dist(body.reachable(-1, (x, y)), (x, y)) < .01
                 if reachable and (self.mouse_contact or math.hypot(paw.x - x, paw.y - y) < 1.5):
                     self.mouse_contact = True
                     paw.x, paw.y = x, y
                     paw.vx, paw.vy = self.mouse_velocity
-            if paw.goal in BY_ID and not paw.landed and paw.age >= paw.duration * .55:
-                contact = BY_ID[paw.goal].contact
+            if paw.goal in self.keyboard.by_id and not paw.landed and paw.age >= paw.duration * .55:
+                contact = self.keyboard.by_id[paw.goal].contact
                 if math.hypot(paw.x - contact[0], paw.y - contact[1] - KEY_TRAVEL) < 1.05:
                     paw.landed = True
                     strength = min(.7, .22 + paw.distance / 120 + math.hypot(paw.vx, paw.vy) / 900)

@@ -18,13 +18,23 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
-from animations import Animations, Pose, LEFT_REST, RIGHT_REST, MOUSE_REST, SLEEP_AFTER
-from keyboard_layout import BOARD, BY_ID, BY_SCAN, KEYS, KEY_TRAVEL, LABELS, key_for_symbol
+from animations import Animations, Pose, SLEEP_AFTER
+from keyboard_layout import Keyboard, KEY_TRAVEL
+from x11_keyboard import POSITIONS
+
 from main import instance_busy
 from pet import PetWindow, visible_position
 from anatomy import BodyGeometry, FaceGeometry, MAX_REACH
 from character import CatArt
 from personality import CALM, CURIOUS, EXCITED, FOCUSED, IMPATIENT, SURPRISED
+
+
+DEFAULT = Keyboard()
+BY_ID = DEFAULT.by_id
+KEYS = tuple(BY_ID.values())
+BOARD = DEFAULT.board
+LEFT_REST, RIGHT_REST = DEFAULT.rest
+MOUSE_REST = DEFAULT.mouse_rest
 
 
 def check_window() -> None:
@@ -93,21 +103,15 @@ def check_motion_and_screens() -> None:
     assert visible_position(QPoint(5000, 5000), QSize(200, 200), areas) == QPoint(1720, 880)
     assert visible_position(QPoint(-1800, 300), QSize(200, 200), areas) == QPoint(-1800, 300)
     assert len({key.identifier for key in KEYS}) == len(KEYS)
-    assert len({key.scan for key in KEYS}) == len(KEYS)
     assert len(KEYS) == 105
     for identifier in ('F1', 'F12', 'PrintScreen', 'ScrollLock', 'Pause', 'NumLock',
                        'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown',
                        'NumpadEnter', 'Numpad0', 'Numpad9', 'MetaRight', 'CtrlRight'):
-        assert BY_SCAN[BY_ID[identifier].scan] == identifier
-    assert BY_ID['NumpadEnter'].scan != BY_ID['Enter'].scan
-    assert BY_ID['Numpad1'].scan != BY_ID['Digit1'].scan
-    assert key_for_symbol(0xff9c) == 'Numpad1'  # Num Lock off: KP_End, not End.
-    assert key_for_symbol(0xffb1) == 'Numpad1'
-    assert key_for_symbol(0xff8d) == 'NumpadEnter'
-    assert LABELS['latam']['Semicolon'] == 'Ñ'
-    assert BY_ID['Numpad0'].contact[0] < BY_ID['ArrowDown'].contact[0]
-    assert BY_ID['P'].contact[0] < BY_ID['A'].contact[0]
-    assert BY_ID['Space'].contact[1] < BY_ID['Digit1'].contact[1]
+        assert identifier in POSITIONS.values()
+    assert POSITIONS['KPEN'] == 'NumpadEnter' and POSITIONS['RTRN'] == 'Enter'
+    assert POSITIONS['KP1'] == 'Numpad1' and POSITIONS['AE01'] == 'Digit1'
+    assert Keyboard(layout='latam').label('Semicolon') == 'Ñ'
+    assert BY_ID['Space'].contact[1] < BY_ID['F1'].contact[1]
     assert BY_ID['P'].preferred_paw == 0 and BY_ID['A'].preferred_paw == 1
     _, _, ux, uy, vx, vy = BY_ID['P'].label_basis
     assert ux < 0 and vy < 0 and ux * vy - uy * vx > 0  # Rotation, without reflection.
@@ -215,15 +219,15 @@ def check_motion_and_screens() -> None:
     state = monitor.snapshot()
     assert state.new_presses == 1
     initial = state.latest
-    monitor.key_up(BY_ID['W'].scan, server_time=200)
+    monitor.key_up('W', server_time=200)
     monitor.key_down('W', server_time=200)
     state = monitor.snapshot()
     assert state.latest == initial and 'W' in state.held and state.new_presses == 0
-    monitor.key_up(BY_ID['W'].scan, server_time=300)
+    monitor.key_up('W', server_time=300)
     monitor.key_down('W', server_time=301)
     state = monitor.snapshot()
     assert state.latest.stamp > initial.stamp and state.new_presses == 1
-    monitor.key_up(BY_ID['W'].scan)
+    monitor.key_up('W')
     QTest.qWait(35)
     state = monitor.snapshot()
     assert 'W' not in state.held and 'W' in state.pulses
@@ -231,7 +235,7 @@ def check_motion_and_screens() -> None:
     assert not monitor.snapshot().pressed and monitor._latest.identifier is None
     for identifier in ('A', 'P', 'Space'):
         monitor.key_down(identifier)
-        monitor.key_up(BY_ID[identifier].scan)
+        monitor.key_up(identifier)
     QTest.qWait(35)
     state = monitor.snapshot()
     assert not state.held and {'A', 'P', 'Space'} <= state.pulses

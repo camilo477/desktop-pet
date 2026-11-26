@@ -6,7 +6,7 @@ import os
 import threading
 import time
 
-from keyboard_layout import BY_ID, BY_SCAN, key_for_symbol
+from keyboard_layout import Keyboard
 
 PULSE_SECONDS = .20
 HINT_SECONDS = .36
@@ -46,7 +46,7 @@ class Activity:
     hints: tuple[KeyHint, KeyHint] = (KeyHint(), KeyHint())
     latest: KeyHint = KeyHint()
     any_held: bool = False
-    layout: str = 'us'
+    layout: str | None = None
     # Unsigned totals since the previous snapshot; repeated keys add no edges.
     new_presses: int = 0
     pointer_distance: float = 0.0
@@ -58,7 +58,8 @@ class Activity:
 
 
 class ActivityMonitor:
-    def __init__(self, global_input, wake_callback=None):
+    def __init__(self, global_input, wake_callback=None, keyboard=None):
+        self.keyboard = keyboard or Keyboard()
         self.global_input = global_input
         self.enabled = False
         self._lock = threading.Lock()
@@ -66,6 +67,7 @@ class ActivityMonitor:
         self._listeners = []
         self._keyboard_listener = None
         self._reader = None
+        self._next_layout_check = 0.0
         self._next_reconcile = 0.0
         self._global_position = self._local_position = None
         self._down = {}
@@ -104,6 +106,7 @@ class ActivityMonitor:
         os.environ['PYNPUT_BACKEND_MOUSE'] = 'xorg'
         try:
             from pynput import keyboard, mouse
+            from x11_keyboard import XkbKeyboard
             monitor = self
 
             # This small adapter uses the pinned X11 backend's raw hook. It avoids
@@ -112,24 +115,21 @@ class ActivityMonitor:
                 def _initialize(self, display):
                     if not self.running:
                         raise self.StopException()
-                    self.layouts, self.variants = ['us'], ['']
+                    self.xkb = None
                     try:
-                        prop = display.screen().root.get_full_property(display.intern_atom('_XKB_RULES_NAMES'), 0)
-                        parts = bytes(prop.value).decode('ascii', errors='ignore').split('\0')
-                        self.layouts = parts[2].split(',') or ['us']
-                        self.variants = parts[3].split(',')
+                        xkb = XkbKeyboard(display)
+                        layout = xkb.refresh()
+                        self.xkb = xkb
+                        monitor.set_layout(layout, self)
                     except Exception:
-                        pass
-                    self.keymap = {}
-                    for code in range(8, 256):
-                        self.keymap[code] = key_for_symbol(display.keycode_to_keysym(code, 0), self.layouts[0])
-                    monitor.set_layout(self.layouts[0], self)
+                        monitor.set_layout(None, self)
                     with monitor._lock:
                         if not self.running or monitor._keyboard_listener is not self:
                             raise self.StopException()
                         monitor._reader = display.query_keymap
                     for code in self._current_codes(display.query_keymap()):
-                        monitor.key_down(self._identifier(code, 0), code, source=self, initial=True)
+                        monitor.key_down(self.xkb.positions.get(code) if self.xkb else None,
+                                         code, source=self, initial=True)
                     if not self.running:
                         raise self.StopException()
 
@@ -137,21 +137,19 @@ class ActivityMonitor:
                 def _current_codes(bitmap):
                     return [code for code in range(8, 256) if bitmap[code // 8] & (1 << (code % 8))]
 
-                def _identifier(self, code, group):
-                    layout = self.layouts[min(group, len(self.layouts) - 1)]
-                    variant = self.variants[min(group, len(self.variants) - 1)] if self.variants else ''
-                    known = layout in ('us', 'es', 'latam', 'gb') and variant not in ('dvorak', 'colemak')
-                    return BY_SCAN.get(code) if known else self.keymap.get(code)
+                def refresh_layout(self):
+                    if self.xkb:
+                        monitor.set_layout(self.xkb.refresh(), self)
 
                 def _handle_message(self, display, event, injected):
                     if monitor._keyboard_listener is not self:
                         return
                     code, kind, stamp = int(event.detail), int(event.type), int(event.time)
                     group = (int(event.state) >> 13) & 3
-                    layout = self.layouts[min(group, len(self.layouts) - 1)]
-                    monitor.set_layout(layout, self)
+                    if self.xkb:
+                        monitor.set_layout(self.xkb.layout(group), self)
                     if kind == 2:  # X11 KeyPress and KeyRelease; no character conversion.
-                        monitor.key_down(self._identifier(code, group), code, stamp, self)
+                        monitor.key_down(self.xkb.positions.get(code) if self.xkb else None, code, stamp, self)
                     elif kind == 3:
                         monitor.key_up(code, stamp, self)
 
@@ -185,20 +183,23 @@ class ActivityMonitor:
                 self.enabled = enabled  # Keep local interaction available after backend failure.
 
     def set_layout(self, layout, source=None):
-        layout = layout if layout in ('es', 'latam') else 'us'
         with self._lock:
-            if source is None or source is self._keyboard_listener:
+            if (source is None or source is self._keyboard_listener) and layout != self._activity.layout:
                 self._activity = replace(self._activity, layout=layout)
+
+    def set_keyboard(self, keyboard):
+        with self._lock:
+            self.keyboard = keyboard
+            self._hints = [KeyHint(), KeyHint()]
+            self._latest = KeyHint()
+            self._pulses.clear()
+            return frozenset(key for key, _ in self._down.values() if key in keyboard.by_id)
 
     def key_down(self, identifier, code=None, server_time=None, source=None, initial=False):
         if code is None:
-            key = BY_ID.get(identifier)
-            if key is None:
-                return
-            code = key.scan
-        if not isinstance(code, int) or not 8 <= code < 256:
+            code = identifier  # Synthetic input can use the physical position directly.
+        elif not isinstance(code, int) or not 8 <= code < 256:
             return
-        identifier = identifier if identifier in BY_ID else None
         now = time.monotonic()
         with self._lock:
             if not self.enabled or (source is not None and source is not self._keyboard_listener):
@@ -214,16 +215,16 @@ class ActivityMonitor:
             self._down[code] = (identifier, now)
             if not initial:
                 self._new_presses += 1
-            if identifier is not None:
                 gap = now - self._last_press
                 interval = .33 if gap > .8 else max(1 / 60, min(.5, gap))
                 if interval > self._activity.key_interval and gap <= .8:
                     interval = (interval + self._activity.key_interval) * .5
                 self._last_press = now
                 self._activity = replace(self._activity, key_interval=interval)
+            if identifier in self.keyboard.by_id:
                 self._pulses[identifier] = now + PULSE_SECONDS
                 hint = KeyHint(identifier, now)
-                sector = BY_ID[identifier].preferred_paw
+                sector = self.keyboard.by_id[identifier].preferred_paw
                 self._hints[sector] = hint
                 self._latest = hint
 
@@ -301,6 +302,13 @@ class ActivityMonitor:
 
     def snapshot(self):
         now = time.monotonic()
+        listener = self._keyboard_listener
+        if self.enabled and listener and hasattr(listener, 'xkb') and now >= self._next_layout_check:
+            self._next_layout_check = now + 2
+            try:
+                listener.refresh_layout()
+            except Exception:
+                self.set_layout(None, listener)
         bitmap = None
         sampled_at = now
         # Query only a current bitmap while keys are held. This repairs missed releases,
@@ -316,7 +324,7 @@ class ActivityMonitor:
                 self._clear_keys(); self._reader = None
             if bitmap is not None:
                 for code, (_, pressed_at) in list(self._down.items()):
-                    if pressed_at <= sampled_at and not bitmap[code // 8] & (1 << (code % 8)):
+                    if isinstance(code, int) and pressed_at <= sampled_at and not bitmap[code // 8] & (1 << (code % 8)):
                         self._down.pop(code, None); self._releases.pop(code, None)
             for code, (deadline, _) in list(self._releases.items()):
                 if now >= deadline:
@@ -325,7 +333,7 @@ class ActivityMonitor:
             self._hints = [hint if now - hint.stamp < HINT_SECONDS else KeyHint() for hint in self._hints]
             if now - self._latest.stamp >= HINT_SECONDS:
                 self._latest = KeyHint()
-            result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key),
+            result = replace(self._activity, held=frozenset(key for key, _ in self._down.values() if key in self.keyboard.by_id),
                            pulses=frozenset(self._pulses), hints=tuple(self._hints), latest=self._latest,
                            any_held=bool(self._down), motion_x=self._motion[0], motion_y=self._motion[1],
                            scroll_x=self._wheel[0], scroll_y=self._wheel[1],

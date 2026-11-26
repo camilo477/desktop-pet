@@ -1,147 +1,155 @@
-"""One physical full-size QWERTY layout for input, artwork and paw contacts."""
+"""Physical key positions and their common projection onto the cat's floor plane."""
 
 from dataclasses import dataclass
+from keyboard_distributions import LEGENDS, TOP_ROW, HOME_ROW, BOTTOM_ROW, NUMBER_ROW
 
+FORMATS = {'60': '60 %', '65': '65 %', '75': '75 %', 'tkl': 'TKL', '100': '100 %'}
+STANDARDS = ('ANSI', 'ISO')
 KEYBOARD_SCALE = .82
 KEY_TRAVEL = .35 * KEYBOARD_SCALE
+MOUSE_ANCHOR = (36.5, 153.5)  # Palm end of the original SVG mouse.
+REST = ((91., 157.), (115., 157.))
 
-
-@dataclass(frozen=True)
-class Key:
-    identifier: str
-    label: str
-    scan: int
-    column: float
-    row: float
-    width: float = 1.0
-    height: float = 1.0
-
-    @staticmethod
-    def project(u: float, v: float) -> tuple[float, float]:
-        # A half-turn on the floor plane: this is the cat's keyboard.
-        u, v = 23.0 - u, 5.0 - v
-        return (64 + KEYBOARD_SCALE * (u * (5.7 + v * .06) - v * .50),
-                160 + KEYBOARD_SCALE * (v * 4.6 + u * .025))
-
-    @property
-    def contact(self) -> tuple[float, float]:
-        return self.project(self.column + self.width * .5, self.row + self.height * .5)
-
-    @property
-    def polygon(self) -> tuple[tuple[float, float], ...]:
-        u, v = self.column + .075, self.row + .075
-        w, h = self.width - .15, self.height - .15
-        return (self.project(u, v), self.project(u + w, v),
-                self.project(u + w, v + h), self.project(u, v + h))
-
-    @property
-    def label_basis(self):
-        u, v = self.column + self.width * .5, self.row + self.height * .5
-        x, y = self.project(u, v)
-        ux, uy = self.project(u + 1, v)
-        vx, vy = self.project(u, v + 1)
-        return x, y, (ux - x) / 5.7, (uy - y) / 5.7, (vx - x) / 4.6, (vy - y) / 4.6
-
-    @property
-    def preferred_paw(self):
-        return 0 if self.contact[0] < KEYBOARD_CENTER[0] else 1
-
-    @property
-    def modifier(self) -> bool:
-        return self.identifier.startswith(("Shift", "Ctrl", "Alt", "Meta")) or self.identifier in ("CapsLock", "Menu")
-
-
-def _definitions() -> tuple[Key, ...]:
-    keys = []
-
-    def row(number, entries):
-        column = 0.0
-        for identifier, label, scan, width in entries:
-            keys.append(Key(identifier, label, scan, column, number, width))
-            column += width
-
-    row(0, [("Backquote", "`", 49, 1)] +
-        [("Digit" + digit, digit, scan, 1) for digit, scan in zip("1234567890", range(10, 20))] +
-        [("Minus", "-", 20, 1), ("Equal", "=", 21, 1), ("Backspace", "bk", 22, 2)])
-    row(1, [("Tab", "tab", 23, 1.5)] +
-        [(letter, letter, scan, 1) for letter, scan in zip("QWERTYUIOP", range(24, 34))] +
-        [("BracketLeft", "[", 34, 1), ("BracketRight", "]", 35, 1), ("Backslash", "\\", 51, 1.5)])
-    row(2, [("CapsLock", "cap", 66, 1.75)] +
-        [(letter, letter, scan, 1) for letter, scan in zip("ASDFGHJKL", range(38, 47))] +
-        [("Semicolon", ";", 47, 1), ("Quote", "'", 48, 1), ("Enter", "ret", 36, 2.25)])
-    row(3, [("ShiftLeft", "sh", 50, 1.25), ("IntlBackslash", "<", 94, 1)] +
-        [(letter, letter, scan, 1) for letter, scan in zip("ZXCVBNM", range(52, 59))] +
-        [("Comma", ",", 59, 1), ("Period", ".", 60, 1), ("Slash", "/", 61, 1),
-         ("ShiftRight", "sh", 62, 2.75)])
-    row(4, [("CtrlLeft", "ctrl", 37, 1.25), ("MetaLeft", "sys", 133, 1.25),
-            ("AltLeft", "alt", 64, 1.25), ("Space", "", 65, 6.25),
-            ("AltRight", "AltGr", 108, 1.25), ("MetaRight", "sys", 134, 1.25),
-            ("Menu", "menu", 135, 1.25), ("CtrlRight", "ctrl", 105, 1.25)])
-    keys.append(Key("Escape", "esc", 9, 0, -1.4))
-    for index in range(12):
-        scan = 67 + index if index < 10 else 95 + index - 10
-        keys.append(Key(f"F{index + 1}", f"F{index + 1}", scan, 2 + index + (index // 4) * .5, -1.4))
-    for identifier, label, scan, column in (("PrintScreen", "prt", 107, 15.5),
-                                          ("ScrollLock", "scr", 78, 16.5), ("Pause", "brk", 127, 17.5)):
-        keys.append(Key(identifier, label, scan, column, -1.4))
-    for number, entries in ((0, (("Insert", "ins", 118), ("Home", "hm", 110), ("PageUp", "pu", 112))),
-                            (1, (("Delete", "del", 119), ("End", "end", 115), ("PageDown", "pd", 117)))):
-        for index, (identifier, label, scan) in enumerate(entries):
-            keys.append(Key(identifier, label, scan, 15.5 + index, number))
-    keys.extend((Key("ArrowUp", "^", 111, 16.5, 3), Key("ArrowLeft", "<", 113, 15.5, 4),
-                 Key("ArrowDown", "v", 116, 16.5, 4), Key("ArrowRight", ">", 114, 17.5, 4)))
-    for index, (identifier, label, scan) in enumerate((("NumLock", "num", 77), ("NumpadDivide", "/", 106),
-                                                    ("NumpadMultiply", "*", 63), ("NumpadSubtract", "-", 82))):
-        keys.append(Key(identifier, label, scan, 19 + index, 0))
-    for number, digits, scans in ((1, "789", (79, 80, 81)), (2, "456", (83, 84, 85)),
-                                 (3, "123", (87, 88, 89))):
-        for index, (digit, scan) in enumerate(zip(digits, scans)):
-            keys.append(Key("Numpad" + digit, digit, scan, 19 + index, number))
-    keys.extend((Key("NumpadAdd", "+", 86, 22, 1, 1, 2),
-                 Key("NumpadEnter", "ret", 104, 22, 3, 1, 2),
-                 Key("Numpad0", "0", 90, 19, 4, 2), Key("NumpadDecimal", ".", 91, 21, 4)))
-    return tuple(keys)
-
-
-KEYBOARD_CENTER = Key.project(7.5, 2.5)
-KEYS = _definitions()
-BY_ID = {key.identifier: key for key in KEYS}
-BY_SCAN = {key.scan: key.identifier for key in KEYS}
-BOARD = tuple(Key.project(u, v) for u, v in ((-.3, -1.7), (23.3, -1.7), (23.3, 5.25), (-.3, 5.25)))
-SPECIAL_SYMBOLS = {0xff1b: "Escape", 0xff08: "Backspace", 0xff09: "Tab", 0xff0d: "Enter",
-                   0xffe1: "ShiftLeft", 0xffe2: "ShiftRight", 0xffe3: "CtrlLeft", 0xffe4: "CtrlRight",
-                   0xffe9: "AltLeft", 0xffea: "AltRight", 0xfe03: "AltRight", 0xffe5: "CapsLock",
-                   0xffeb: "MetaLeft", 0xffec: "MetaRight", 0xff67: "Menu", 0xff51: "ArrowLeft",
-                   0xff52: "ArrowUp", 0xff53: "ArrowRight", 0xff54: "ArrowDown", 0x20: "Space",
-                   0xff63: "Insert", 0xffff: "Delete", 0xff50: "Home", 0xff57: "End",
-                   0xff55: "PageUp", 0xff56: "PageDown", 0xff61: "PrintScreen", 0xff14: "ScrollLock",
-                   0xff13: "Pause", 0xff7f: "NumLock", 0xff8d: "NumpadEnter", 0xffaf: "NumpadDivide",
-                   0xffaa: "NumpadMultiply", 0xffad: "NumpadSubtract", 0xffab: "NumpadAdd",
-                   0xffae: "NumpadDecimal", 0xffac: "NumpadDecimal"}
-SPECIAL_SYMBOLS.update({0xffbe + i: f"F{i + 1}" for i in range(12)})
-SPECIAL_SYMBOLS.update({0xffb0 + i: f"Numpad{i}" for i in range(10)})
-SPECIAL_SYMBOLS.update(dict(zip((0xff9e, 0xff9c, 0xff99, 0xff9b, 0xff96, 0xff9d, 0xff98, 0xff95, 0xff97, 0xff9a),
-                                (f"Numpad{i}" for i in range(10)))))
-SPECIAL_SYMBOLS[0xff9f] = "NumpadDecimal"
-LABELS = {
-    "es": {"Backquote": "º", "Minus": "'", "Equal": "¡", "BracketLeft": "`", "BracketRight": "+",
-           "Backslash": "ç", "Semicolon": "Ñ", "Quote": "´", "Slash": "-"},
-    "latam": {"Backquote": "|", "Minus": "'", "Equal": "¿", "BracketLeft": "´", "BracketRight": "+",
-              "Backslash": "}", "Semicolon": "Ñ", "Quote": "{", "Slash": "-"},
+BASE_LABELS = {
+    **dict(zip(NUMBER_ROW, '`1234567890-=', strict=True)),
+    'Backspace': 'bk', 'Enter': 'ret', 'Tab': 'tab', 'CapsLock': 'cap', 'Space': '',
+    'ShiftLeft': 'sh', 'ShiftRight': 'sh', 'CtrlLeft': 'ctrl', 'CtrlRight': 'ctrl',
+    'AltLeft': 'alt', 'AltRight': 'AltGr', 'MetaLeft': 'sys', 'MetaRight': 'sys',
+    'Menu': 'menu', 'Escape': 'esc',
+    'BracketLeft': '[', 'BracketRight': ']', 'Backslash': '\\', 'Semicolon': ';',
+    'Quote': "'", 'Comma': ',', 'Period': '.', 'Slash': '/', 'IntlBackslash': '<',
+    'Escape': 'esc', 'Backspace': 'bk', 'CapsLock': 'cap', 'Enter': 'ret', 'Tab': 'tab',
+    'Space': '', 'ShiftLeft': 'sh', 'ShiftRight': 'sh', 'AltLeft': 'alt', 'AltRight': 'AltGr',
+    'CtrlLeft': 'ctrl', 'CtrlRight': 'ctrl', 'MetaLeft': 'sys', 'MetaRight': 'sys', 'Menu': 'menu',
+    'PrintScreen': 'prt', 'ScrollLock': 'scr', 'Pause': 'brk', 'Insert': 'ins', 'Home': 'hm',
+    'PageUp': 'pu', 'Delete': 'del', 'End': 'end', 'PageDown': 'pd', 'ArrowUp': '^',
+    'ArrowLeft': '<', 'ArrowDown': 'v', 'ArrowRight': '>', 'NumLock': 'num',
+    'NumpadDivide': '/', 'NumpadMultiply': '*', 'NumpadSubtract': '-', 'NumpadAdd': '+',
+    'NumpadEnter': 'ret', 'NumpadDecimal': '.', **{f'Numpad{n}': str(n) for n in range(10)},
 }
 
 
-def key_for_symbol(symbol: int, layout: str = "us") -> str | None:
-    if symbol in SPECIAL_SYMBOLS:
-        return SPECIAL_SYMBOLS[symbol]
-    if ord("a") <= symbol <= ord("z") or ord("A") <= symbol <= ord("Z"):
-        return chr(symbol).upper()
-    if ord("0") <= symbol <= ord("9"):
-        return "Digit" + chr(symbol)
-    if symbol in (0xf1, 0xd1):
-        return "Semicolon"
-    for key in KEYS:
-        label = LABELS.get(layout, {}).get(key.identifier, key.label)
-        if len(label) == 1 and ord(label) == symbol:
-            return key.identifier
-    return None
+def placements(form, standard):
+    compact = form in ('65', '75')
+    function_row = form not in ('60', '65')
+    keys = []
+
+    def add(identifier, column, line, width=1., height=1.):
+        keys.append((identifier, column, line, width, height))
+
+    def row(line, entries):
+        column = 0.
+        for entry in entries:
+            identifier, width = (entry, 1.) if isinstance(entry, str) else entry
+            add(identifier, column, line, width)
+            column += width
+
+    row(0, [NUMBER_ROW[0] if function_row else 'Escape', *NUMBER_ROW[1:], ('Backspace', 2)])
+    row(1, [('Tab', 1.5), *TOP_ROW])
+    row(2, [('CapsLock', 1.75), *HOME_ROW])
+    if standard == 'ISO':
+        add('Backslash', 12.75, 2)
+        add('Enter', 13.5, 1, 1.5, 2)
+        left_shift = [('ShiftLeft', 1.25), 'IntlBackslash']
+    else:
+        add('Backslash', 13.5, 1, 1.5)
+        add('Enter', 12.75, 2, 2.25)
+        left_shift = [('ShiftLeft', 2.25)]
+    row(3, [*left_shift, *BOTTOM_ROW, ('ShiftRight', 1.75 if compact else 2.75)])
+    bottom = [('CtrlLeft', 1.25), ('MetaLeft', 1.25), ('AltLeft', 1.25), ('Space', 6.25)]
+    if compact:
+        row(4, [*bottom, 'AltRight', 'Fn', 'CtrlRight', 'ArrowLeft', 'ArrowDown', 'ArrowRight'])
+        add('ArrowUp', 14, 3)
+        navigation = ('Delete', 'Home', 'PageUp', 'PageDown') if form == '65' else ('Home', 'End', 'PageUp', 'PageDown')
+        for line, identifier in enumerate(navigation):
+            add(identifier, 15, line)
+    else:
+        right = ('AltRight', 'Fn' if form == '60' else 'MetaRight', 'Menu', 'CtrlRight')
+        row(4, [*bottom, *((identifier, 1.25) for identifier in right)])
+
+    if function_row:
+        line = -1.1 if compact else -1.4
+        add('Escape', 0, line)
+        for i in range(12):
+            add(f'F{i+1}', 1.5 + i if compact else 2 + i + (i // 4) * .5, line)
+        if compact:
+            add('PrintScreen', 14, line)
+            add('Delete', 15, line)
+        else:
+            for line, ids in ((-1.4, ('PrintScreen', 'ScrollLock', 'Pause')),
+                              (0, ('Insert', 'Home', 'PageUp')), (1, ('Delete', 'End', 'PageDown')),
+                              (4, ('ArrowLeft', 'ArrowDown', 'ArrowRight'))):
+                for i, identifier in enumerate(ids):
+                    add(identifier, 15.5 + i, line)
+            add('ArrowUp', 16.5, 3)
+    if form == '100':
+        for i, identifier in enumerate(('NumLock', 'NumpadDivide', 'NumpadMultiply', 'NumpadSubtract')):
+            add(identifier, 19 + i, 0)
+        for line, digits in enumerate(('789', '456', '123'), 1):
+            for i, digit in enumerate(digits):
+                add('Numpad' + digit, 19 + i, line)
+        add('NumpadAdd', 22, 1, 1, 2)
+        add('NumpadEnter', 22, 3, 1, 2)
+        add('Numpad0', 19, 4, 2)
+        add('NumpadDecimal', 21, 4)
+    return keys
+
+
+@dataclass(frozen=True, slots=True)
+class Key:
+    identifier: str
+    width: float
+    polygon: tuple
+    contact: tuple
+    label_basis: tuple
+    preferred_paw: int
+
+    @property
+    def modifier(self):
+        return self.identifier.startswith(('Shift', 'Ctrl', 'Alt', 'Meta')) or self.identifier in ('CapsLock', 'Menu')
+
+
+class Keyboard:
+    def __init__(self, form='100', standard='ISO', layout='us'):
+        if form not in FORMATS or standard not in STANDARDS or layout not in LEGENDS:
+            raise ValueError('Unsupported keyboard configuration')
+        self.form, self.standard, self.layout = form, standard, layout
+        positions = placements(form, standard)
+        self.columns = max(col + w for _, col, _, w, _ in positions)
+        reduction = 23 - self.columns
+        self.origin_x = 64 + 1.9 * reduction
+        self.mouse_offset = min(3., reduction * .5)
+        self.mouse_rest = (MOUSE_ANCHOR[0] + self.mouse_offset, MOUSE_ANCHOR[1])
+        self.rest = ((REST[0][0] + .24 * reduction, REST[0][1]),
+                     (REST[1][0] - .16 * reduction, REST[1][1]))
+        self.center = self.project(self.columns / 2, 2.5)
+        split = self.project(7.5, 2.5)[0]
+        far = min(line for _, _, line, _, _ in positions) - .3
+        self.board = tuple(self.project(u, v) for u, v in (
+            (-.3, far), (self.columns + .3, far), (self.columns + .3, 5.25), (-.3, 5.25)))
+        self.by_id = {}
+        for identifier, col, line, w, h in positions:
+            l, r, t, b = col + .075, col + w - .075, line + .075, line + h - .075
+            outline = ((l, t), (r, t), (r, b), (l, b))
+            u, v = col + w / 2, line + h / 2
+            if identifier == 'Enter' and standard == 'ISO':
+                step = line + 1 - .075
+                outline = ((l, t), (r, t), (r, b), (l + .25, b), (l + .25, step), (l, step))
+                u += .125
+            x, y = self.project(u, v)
+            ux, uy = self.project(u + 1, v)
+            vx, vy = self.project(u, v + 1)
+            basis = (x, y, (ux-x)/5.7, (uy-y)/5.7, (vx-x)/4.6, (vy-y)/4.6)
+            self.by_id[identifier] = Key(identifier, w, tuple(self.project(*pt) for pt in outline),
+                                         (x, y), basis, int(x >= split))
+
+        self.ids = frozenset(self.by_id)
+
+    def project(self, u, v):
+        # Half-turn about the floor plane: the number pad is on the viewer's left.
+        u, v = self.columns - u, 5 - v
+        return (self.origin_x + KEYBOARD_SCALE * (u * (5.7 + v * .06) - v * .50),
+                160 + KEYBOARD_SCALE * (v * 4.6 + u * .025))
+
+    def label(self, identifier):
+        return LEGENDS[self.layout].get(identifier, BASE_LABELS.get(identifier, identifier))

@@ -7,6 +7,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, QSize, Qt,
 from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
+from keyboard_layout import Keyboard
 from animations import Animations
 from character import CatArt
 from activity import Activity, ActivityMonitor, supports_global_input
@@ -50,7 +51,8 @@ class PetWindow(QWidget):
         self.mask_supported = platform == "xcb" or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.global_input = supports_global_input(platform)
-        self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit)
+        self.keyboard = Keyboard()
+        self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit, self.keyboard)
         self.activity_ready.connect(self.input_arrived, Qt.ConnectionType.QueuedConnection)
         self.local_gaze = (0.0, 0.0)
         self.local_pointer = None
@@ -69,9 +71,9 @@ class PetWindow(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setFixedSize(size if size in SIZES else 200, size if size in SIZES else 200)
-        self.art = CatArt()
+        self.art = CatArt(self.keyboard)
         self.art.cache(self.width(), self.devicePixelRatioF())
-        self.animations = Animations()
+        self.animations = Animations(self.keyboard)
         self.last_frame = time.monotonic()
         self.press_position: QPoint | None = None
         self.press_region = None
@@ -137,7 +139,8 @@ class PetWindow(QWidget):
     def tick(self) -> None:
         now = time.monotonic()
         activity = self.activity.snapshot() if self.reactions else Activity()
-        self.art.set_layout(activity.layout)
+        if self.reactions:
+            self.keyboard.layout = activity.layout or 'us'
         gaze = (0.0, 0.0)
         if now - self.local_pointer_time >= 1.2:
             self.local_pointer = None
