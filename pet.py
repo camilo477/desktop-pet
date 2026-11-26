@@ -144,6 +144,8 @@ class PetWindow(QWidget):
                             math.tanh((cursor.y() - head.y()) / max(1, area.height() * 0.30)))
             else:
                 gaze = self.local_gaze
+        if self.press_position is not None or self._menu is not None:
+            self.animations.interact()
         self.animations.advance(min(now - self.last_frame, 0.1), now, activity, gaze)
         interval = 100 if self.animations.sleeping else 34
         if self.timer.interval() != interval:
@@ -183,6 +185,7 @@ class PetWindow(QWidget):
                      round(pose.tail * math.sin(pose.tail_phase) * 20),
                      round(pose.tail * math.cos(pose.tail_phase) * 20),
                      round(pose.tail_tip * 2),
+                     round(pose.motion.curl * 30), round(pose.motion.tilt * 3),
                      round(pose.sleep * 250), round(pose.balance_x * 2), round(pose.balance_y * 2),
                      round(pose.contact * 15), round(pose.mouse_dx * 2), round(pose.mouse_dy * 2),
                      round(pose.groom * 20), round(pose.yawn * 20))

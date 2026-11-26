@@ -460,19 +460,71 @@ def check_geometry_and_contacts() -> None:
         else:
             assert animation.paws[0].goal == 'mouse' and pose.left_x < 90 and not pose.pressed
 
-    for kind, source in (('wash', 'keyboard'), ('lick', 'keyboard'), ('yawn', 'mouse')):
+    for kind, typing, pointer, wheel in (
+            ('stretch', True, False, False), ('stretch', False, True, False),
+            ('ear_rub', True, False, False), ('knead', True, False, False),
+            ('knead', False, False, True), ('look', True, False, False),
+            ('lick', True, True, False), ('wash', True, False, False),
+            ('yawn', True, False, False), ('sleep', True, True, True)):
         animation = Animations()
         animation.last_activity = 0
-        animation.start_idle(kind)
-        for frame in range(46):
-            animation.advance(1 / 30, 25 + frame / 30)
-        assert max(animation.pose.groom, animation.pose.yawn) > .7
-        event = (Activity(keyboard=27, held=frozenset({'P'}), latest=KeyHint('P', 27))
-                 if source == 'keyboard' else Activity(mouse=27, motion_x=10))
-        pose = animation.advance(1 / 30, 27, event)
-        goals = {paw.goal for paw in animation.paws}
-        assert 'groom' not in goals and ('P' if source == 'keyboard' else 'mouse') in goals
-        assert max(pose.groom, pose.yawn) > 0 and not pose.contacts
+        if kind == 'sleep':
+            for frame in range(65):
+                animation.advance(.1, 200 + frame / 10)
+            assert animation.sleeping
+            start = 207
+        else:
+            animation.start_idle(kind)
+            for frame in range(46):
+                pose = animation.advance(1 / 30, 25 + frame / 30)
+                assert not pose.pressed and not pose.contacts and not animation.mouse_contact
+            assert pose.action == kind
+            start = 27
+
+        before = replace(animation.pose)
+        for frame in range(24):
+            now = start + frame / 30
+            event = Activity(mouse=now if pointer else -math.inf, motion_x=10 if pointer else 0,
+                             scroll=now if wheel else -math.inf, scroll_y=int(wheel))
+            if typing:
+                # Fifteen fresh physical presses per second, with releases in between.
+                key = ('P', 'A', 'L')[frame // 2 % 3]
+                if frame % 2 == 0:
+                    event = replace(event, keyboard=now, held=frozenset({key}),
+                                    latest=KeyHint(key, now), new_presses=1, key_interval=1 / 15)
+            pose = animation.advance(1 / 30, now, event)
+            if event.held:
+                assert key in (pose.left_key, pose.right_key)
+                bounds = art.key_paths[key].boundingRect().adjusted(-1, -1, 1, 2).toAlignedRect()
+                assert painted(pose).copy(bounds) != painted(replace(pose, pressed=frozenset())).copy(bounds)
+            if pointer or wheel:
+                assert animation.paws[0].goal == 'mouse'
+                if frame == 0:
+                    # The shell stays put while the painted foreleg starts its reach.
+                    assert not animation.mouse_contact and pose.mouse_dx == pose.mouse_dy == 0
+                    limb = QRect(14, 105, 90, 54)
+                    old_paw = replace(pose, left_x=before.left_x, left_y=before.left_y)
+                    assert painted(pose).copy(limb) != painted(old_paw).copy(limb)
+            if frame == 0:
+                assert not pose.contacts
+                assert all(paw.goal in BY_ID or paw.goal in ('ready', 'mouse', 'rest') for paw in animation.paws)
+        for frame in range(32):
+            pose = animation.advance(1 / 30, start + 1 + frame / 30)
+        assert not pose.pressed and not pose.contacts
+        assert all(paw.goal == 'rest' for paw in animation.paws)
+
+    animation = Animations()
+    animation.last_activity = 0
+    animation.start_idle('stretch')
+    for frame in range(60):
+        pose = animation.advance(1 / 30, 178 + frame / 30)
+    assert pose.action == 'stretch' and pose.sleep == 0
+    for frame in range(65):
+        pose = animation.advance(.1, 180 + frame / 10)
+    assert animation.last_activity == 0 and animation.sleeping
+    assert pose.action is None and not eyes_visible(painted(pose))
+    assert math.dist((pose.left_x, pose.left_y), LEFT_REST) < .01
+    assert math.dist((pose.right_x, pose.right_y), RIGHT_REST) < .01
 
 
 if __name__ == "__main__":

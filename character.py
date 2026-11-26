@@ -44,7 +44,7 @@ class CatArt:
         self.wheel_center = self.renderer.boundsOnElement('mouse-wheel').center()
         elements = {node.get('id'): node for node in ET.parse(path).iter() if node.get('id')}
         self.shapes = {}
-        names = ('body', 'head-shape', 'tail', 'ear-left', 'ear-right',
+        names = ('body', 'head-shape', 'tail', 'tail-curled', 'ear-left', 'ear-right',
                  'ear-inner-left', 'ear-inner-right', 'face-volume') + BODY_TONES
         for name in names:
             node = elements[name]
@@ -152,13 +152,17 @@ class CatArt:
     def _tail(self, p, pose, body):
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.tail_fur)
         points = self.shapes['tail']
+        curled = self.shapes['tail-curled']
         warped = []
         amplitude = (pose.tail * 2.4 + pose.pet * .8 + abs(pose.balance_velocity) * .012) * (1 - pose.sleep)
         for i, (x, y) in enumerate(points):
+            if pose.motion.curl:
+                x = mix(x, curled[i][0], pose.motion.curl)
+                y = mix(y, curled[i][1], pose.motion.curl)
             weight = math.sin(math.pi * i / (len(points) - 1)) ** 2
             x += math.sin(pose.tail_phase - weight * 2) * amplitude * weight
             y += math.sin(pose.tail_phase - weight * 2 + .6) * amplitude * weight * .55
-            y += pose.tail_tip * weight * weight
+            y += (pose.tail_tip + pose.motion.tip) * weight * weight
             warped.append(body.map(x, y))
         p.drawPath(curve(warped))
 
@@ -172,6 +176,8 @@ class CatArt:
         dx, dy = wx - sx, wy - sy
         distance = math.hypot(dx, dy)
         bend = max(4, 12 - distance * .09)
+        if side == pose.action_side:
+            bend += 11 * pose.motion.rub
         cx = (sx + wx) * .5 + side * bend
         cy = (sy + wy) * .5 + min(9, abs(dx) * .12)
         reach = body.mouse_reach if side < 0 else 0
@@ -233,16 +239,8 @@ class CatArt:
         self.head_center = face.cx
         self.head_hit_paths = []
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.head_fur)
-        for side, name, anchor in ((-1, 'ear-left', (82, 57)), (1, 'ear-right', (125, 57))):
-            angle = math.radians((pose.ear_left if side < 0 else pose.ear_right)
-                                 + side * pose.sleep * 20 + side * pose.pet * 13)
-            cos, sin = math.cos(angle), math.sin(angle)
-
-            def ear_point(x, y):
-                x, y = x - anchor[0], y - anchor[1]
-                return face.point(anchor[0] - 101 + x * cos - y * sin,
-                                  anchor[1] - 77 + x * sin + y * cos, -3)
-
+        for side, name in ((-1, 'ear-left'), (1, 'ear-right')):
+            ear_point = face.ear_projection(side)
             path = curve([ear_point(x, y) for x, y in self.shapes[name]])
             p.setBrush(self.head_fur); p.drawPath(path)
             self.head_hit_paths.append(path)
@@ -301,7 +299,7 @@ class CatArt:
         p.restore()
         for side in (-1, 1):
             flex = (pose.pet * math.sin(pose.time * 7) * .6 + pose.groom * .5
-                    + pose.balance_velocity * .006 + pose.expression.whiskers)
+                    + pose.balance_velocity * .006 + pose.expression.whiskers + pose.motion.whiskers)
             p.setPen(QPen(self.whisker, .65, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.setBrush(Qt.BrushStyle.NoBrush)
             for level in (-1, 1):
@@ -354,6 +352,9 @@ class CatArt:
             p.save(); p.translate(x, y); p.rotate(-14 * reach)
             pressure = pose.left_pressure if side < 0 else pose.right_pressure
             p.scale(1 + pressure * .035, 1 - pressure * .10)
+            if pose.motion.content and not pose.pressed and pose.mouse < .01:
+                planted = pose.motion.content * smoothstep((y - 153) / 4)
+                p.scale(1 + .16 * planted, 1 - .13 * planted)
             p.translate(-reach, mix(-3.5, 0, reach))
             self.layer(p, 'paw'); p.restore()
         self._zzz(p, pose); p.restore()

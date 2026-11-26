@@ -7,7 +7,8 @@ import random
 from activity import Activity, KeyHint
 from keyboard_layout import BY_ID, KEY_TRAVEL
 from anatomy import BodyGeometry, FaceGeometry
-from personality import CALM, Expression, Personality
+from idle_motion import DURATIONS, QUIET, STILL, IdleMotion, sample, smoothstep
+from personality import CALM, CONTENT, Expression, Personality
 
 LEFT_REST = (91.0, 157.0)
 RIGHT_REST = (115.0, 157.0)
@@ -27,11 +28,6 @@ def approach(value, target, speed, dt):
 
 def mix(start, end, amount):
     return start + (end - start) * amount
-
-
-def smoothstep(value):
-    value = max(0, min(1, value))
-    return value * value * (3 - 2 * value)
 
 
 def spring(value, velocity, target, speed, dt):
@@ -83,6 +79,8 @@ class Pose:
     tongue: float = 0.0
     yawn: float = 0.0
     action: str | None = None
+    motion: IdleMotion = STILL
+    action_side: int = -1
     contact: float = 0.0
     contact_side: float = 0.0
     contacts: tuple[tuple[str, float], ...] = ()
@@ -172,6 +170,10 @@ class Animations:
         self.action_duration = 4.0
         self.action_weight = 0.0
         self.look_side = 1
+        self.look_height = 0.0
+        self.action_strength = 1.0
+        self.last_idle = None
+        self.last_wake = -math.inf
 
     @property
     def sleeping(self):
@@ -208,12 +210,14 @@ class Animations:
         self.interact()
 
     def start_idle(self, kind):
-        if kind not in ('look', 'shift', 'lick', 'wash', 'yawn'):
+        if kind not in DURATIONS:
             return
-        self.action_kind = kind
+        self.action_kind = self.last_idle = kind
         self.action_start = self.time
-        self.action_duration = {'look': 3.8, 'shift': 3.3, 'lick': 4.5, 'wash': 4.6, 'yawn': 3.5}[kind]
+        self.action_duration = random.uniform(*DURATIONS[kind])
         self.look_side = random.choice((-1, 1))
+        self.look_height = random.uniform(-.75, .15)
+        self.action_strength = random.uniform(.84, 1)
         self.next_idle = self.time + self.action_duration + random.uniform(*IDLE_ACTION_GAP)
 
     def _assign(self, now, activity, mouse):
@@ -276,19 +280,31 @@ class Animations:
             self.ear_start = t; self.ear_side = random.choice((-1, 1))
             self.next_ear = t + random.uniform(11, 24)
         age = t - self.ear_start
-        flick = math.sin(math.pi * age / .55) ** 2 * 4 if 0 <= age < .55 else 0
+        flick = 0
+        if 0 <= age < .65:
+            progress = age / .65
+            flick = (math.sin(math.pi * progress) ** 2 * math.sin(math.tau * progress) *
+                     12 * (1 - .85 * pose.relax) * (1 - pose.sleep))
         pose.ear_left = flick if self.ear_side < 0 else 0
         pose.ear_right = -flick if self.ear_side > 0 else 0
         allowed = idle >= IDLE_ACTION_AFTER and idle < SLEEP_AFTER and not active
         if allowed and self.action_kind is None and t >= self.next_idle:
-            choices = ('look', 'shift', 'yawn') if idle > RELAX_AFTER else ('look', 'shift', 'lick', 'wash', 'yawn')
-            self.start_idle(random.choice(choices))
+            choices = QUIET
+            if idle < RELAX_AFTER:
+                choices += tuple(DURATIONS)
+                if t - self.last_wake < 30:
+                    choices += ('stretch',)
+            elif idle < RELAX_AFTER + 55:
+                choices += ('stretch', 'knead', 'lick')
+            self.start_idle(random.choice([kind for kind in choices if kind != self.last_idle]))
         phase = (t - self.action_start) / self.action_duration
         playing = self.action_kind is not None and phase < 1 and allowed
         self.action_weight = approach(self.action_weight, float(playing), 7 if playing else 14, dt)
         if not playing and self.action_weight < .001:
             self.action_kind = None
         pose.action = self.action_kind
+        pose.action_side = self.look_side
+        pose.motion = sample(self.action_kind, phase, self.action_weight, self.look_side, self.action_strength)
         envelope = math.sin(math.pi * max(0, min(1, phase))) ** 2 * self.action_weight
         pose.groom = envelope if self.action_kind in ('lick', 'wash') else 0
         pose.tongue = pose.groom * max(0, math.sin(phase * math.tau * 4)) if self.action_kind == 'lick' else 0
@@ -335,6 +351,7 @@ class Animations:
         prior_idle = now - self.last_activity
         active = activity.any_held or bool(activity.held) or observed > self.last_activity or self.touch_pending
         if self.sleeping and active:
+            self.last_wake = self.time
             dt = min(dt, 1 / 30)  # Restore fluid wake frames after the low-rate sleeping tick.
             self.blink_start = -10.0
             self.next_blink = self.time + random.uniform(1.2, 2.5)
@@ -350,15 +367,19 @@ class Animations:
         pose.relax = approach(pose.relax, relaxing, .8 if relaxing > pose.relax else 6, dt)
         expression = self.personality.update(dt, now, activity, prior_idle,
                                              playing and self.action_kind == 'look', pose.pet, pose.relax)
+        motion = pose.motion
+        expression = expression.blend(CONTENT, motion.content * (1 - pose.pet))
         pose.expression = expression
         sleep_target = float(idle >= SLEEP_AFTER)
         self.sleep_goal = approach(self.sleep_goal, sleep_target, 1.6 if sleep_target else 10, dt)
         pose.sleep = approach(pose.sleep, self.sleep_goal, 2.4 if sleep_target else 12, dt)
         # The eyelids can open while the head is still tilted.
-        pose.blink = max(pose.blink, .64 * pose.relax, smoothstep((self.sleep_goal - .35) / .65))
+        pose.blink = max(pose.blink, motion.lids, .64 * pose.relax, smoothstep((self.sleep_goal - .35) / .65))
         pose.zzz = approach(pose.zzz, smoothstep((pose.sleep - .78) / .22) if sleep_target else 0, 8, dt)
-        self.breath_phase = (self.breath_phase + dt * math.tau / mix(4.2, 6.2, pose.sleep)) % math.tau
-        pose.breath = math.sin(self.breath_phase) * mix(1, .4, pose.sleep)
+        drift = math.sin(self.time * .24) * (1 - pose.sleep)
+        period = mix(4.2 + .27 * drift, 6.2, pose.sleep)
+        self.breath_phase = (self.breath_phase + dt * math.tau / period) % math.tau
+        pose.breath = math.sin(self.breath_phase) * mix(1 + .065 * drift, .4, pose.sleep)
         if self.sleeping and sleep_target and not active:
             pose.blink = 1.0; pose.tail = 0.0
             pose.tail_tip = 0.0
@@ -405,7 +426,9 @@ class Animations:
         elif key_point:
             look = ((self.focus_point[0] - 116) / 72, .95)
         elif playing and self.action_kind == 'look':
-            look = (self.look_side * .55 * action, -.05)
+            look = (self.look_side * .68 * action, self.look_height * action)
+        elif playing and self.action_kind == 'ear_rub':
+            look = (self.look_side * .30 * action, -.14 * action)
         elif pose.groom > .02:
             look = (-.13, .38)
         elif pose.yawn > .02:
@@ -439,8 +462,8 @@ class Animations:
             mouse_lean = -15 + pose.mouse_dx * .55
             target_x = mix(mouse_lean, target_x, .18) if key_point else mouse_lean
             target_y = max(target_y, 10 + pose.mouse_dy * .32)
-        if playing and self.action_kind == 'shift':
-            target_x += self.look_side * action * 2
+        target_x += motion.lean
+        target_y += motion.drop
         if pose.groom > 0:
             target_x -= pose.groom * 1.6
             target_y += pose.groom * 1.8
@@ -451,12 +474,17 @@ class Animations:
         pose.balance_y = approach(pose.balance_y, target_y * rest_weight, 10, dt)
         pose.balance_velocity = (pose.balance_x - old_balance) / max(.001, dt)
         swivel = toward * expression.tilt * .6
-        pose.ear_left += (swivel - expression.ears) * (1 - pose.sleep) + pose.balance_velocity * .013
-        pose.ear_right += (swivel + expression.ears) * (1 - pose.sleep) + pose.balance_velocity * .009
+        spread = expression.ears + motion.ears
+        pose.ear_left += (swivel - spread) * (1 - pose.sleep) + pose.balance_velocity * .013
+        pose.ear_right += (swivel + spread) * (1 - pose.sleep) + pose.balance_velocity * .009
+        pose.ear_left += motion.swivel * (.2 if motion.rub and pose.action_side > 0 else 1)
+        pose.ear_right += motion.swivel * (.2 if motion.rub and pose.action_side < 0 else 1)
         body = BodyGeometry(pose)
         face = FaceGeometry(pose, body)
         for index, paw in enumerate(self.paws):
             rest = LEFT_REST if index == 0 else RIGHT_REST
+            side = -1 if index == 0 else 1
+            offset = motion.left if index == 0 else motion.right
             if index == MOUSE_PAW and mouse_active:
                 paw.aim('mouse', (MOUSE_REST[0] + pose.mouse_dx, MOUSE_REST[1] + pose.mouse_dy + pose.click * .4))
             elif paw.key in BY_ID:
@@ -465,6 +493,11 @@ class Animations:
                 paw.ready = (mix(rest[0], point[0], .4), min(161, point[1] - 5))
             elif playing and self.action_kind in ('lick', 'wash') and index == 0:
                 paw.aim('groom', face.grooming_target(self.action_kind, phase))
+            elif playing and motion.rub and side == pose.action_side:
+                x, y = face.ear_grooming_target(side, motion.stroke)
+                paw.aim('ear_rub', (mix(rest[0], x, motion.rub), mix(rest[1], y + 3.5, motion.rub)))
+            elif playing and offset is not None:
+                paw.aim(self.action_kind, (rest[0] + offset[0], rest[1] + offset[1]))
             elif now - activity.keyboard < .70 and paw.ready is not None:
                 paw.aim('ready', paw.ready)
             else:

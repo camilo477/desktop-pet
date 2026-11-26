@@ -32,11 +32,15 @@ activity in a transparent window without taking keyboard focus.
   have separate intensity measurements. Holding a key keeps the paw planted.
 - Eyes and head respond independently to shared attention; facial features use
   a small projected surface to follow turns and downward glances.
-- Occasional grooming, face washing, yawning, glancing and small posture changes.
+- Miga occasionally stretches its forelegs, kneads the floor behind the keyboard,
+  or uses a forepaw to rub beside an ear. It can shake its head, flick one ear,
+  shift its weight, tuck its tail or look up and to either side. Paw licking,
+  face washing and yawning are also part of its idle repertoire.
 - Miga falls asleep seated at the keyboard. Its eyes close, its head dips to one
   side and three Zs drift up beside its head as its breathing slows.
-- Current input redirects the paws during grooming, yawning and waking. Pressed
-  keys light up on the next frame while the eyes open and the head lifts.
+- Keyboard, pointer and scroll input redirect the paws from their current
+  positions during any idle action or while waking. Pressed keys light up on
+  the next frame. Contact follows when a paw actually reaches the peripheral.
 - Head pats with a brief coordinated squint and lean, dragging, and clicks through empty areas.
 - Three sizes, an optional always-on-top mode, activity control and animation pause.
 - Position and preferences saved with QSettings.
@@ -74,7 +78,8 @@ cd desktop-pet
 The installer creates `.venv` in this directory and a launcher in
 `~/.local/bin/miga`. It needs no administrator privileges and can be run
 again. On upgrade, it removes the old `mascota` link if it points to this
-checkout. Existing preferences and running instances carry over. Keep the project directory in place. Installation may download packages;
+checkout. Existing preferences and running instances carry over. Keep the
+project directory in place. Installation may download packages;
 the application then runs entirely offline.
 
 If `~/.local/bin` is missing from your PATH, add this line once to your shell
@@ -123,8 +128,11 @@ queuing a delayed sequence. All recognized pressed keys are shown even when
 there are more held keys than available paws.
 
 After 15 seconds without observed activity, occasional idle actions can begin.
-After one minute Miga gradually relaxes, and after three minutes it settles into
-sleep. A held key keeps it awake. Input or a direct click wakes it smoothly.
+Each lasts roughly one to five seconds, with 12–27 seconds of rest between
+completed actions. Miga avoids repeating its last choice. After one minute it
+gradually relaxes and favors quieter movements. After three minutes it falls
+asleep seated. Its own movements leave the inactivity timer running. A held
+key keeps it awake. Input or a direct click wakes it smoothly.
 Sleep runs at about 10 FPS; pausing stops rendering entirely. These intervals
 are simple constants in `animations.py`.
 
