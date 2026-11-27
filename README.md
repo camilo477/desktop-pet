@@ -233,8 +233,8 @@ and menu controls available. Disabling activity reactions stops global input
 listeners; direct touch, lifting and normal idle behaviors continue.
 
 The mouse paw returns to the keyboard after approximately 500 ms without real
-pointer movement or scrolling, followed by a smooth transfer. A stationary pointer or a
-click alone does not keep the paw on the mouse. Interest in a nearby face-level
+pointer movement, scrolling or clicks, followed by a smooth transfer. A click with a
+stationary cursor brings the paw to the mouse or touchpad before it presses. Interest in a nearby face-level
 pointer fades when it stops. When typing without pointer motion, attention moves to the keyboard.
 Scrolling without pointer movement directs attention to the small mouse.
 Mouse travel follows the cat's peripheral plane, with both horizontal and

@@ -169,6 +169,39 @@ def check_touchpad():
                 assert math.dist((pose.left_x, pose.left_y), a.keyboard.mouse_rest) < .01
 
 
+def check_stationary_click():
+    for pointer in ('mouse', 'touchpad'):
+        kb = Keyboard(pointer=pointer)
+        a = Animations(kb)
+        held = frozenset({'P'})
+        dt = 1 / 30
+        for i in range(30):
+            a.advance(dt, i * dt, Activity(held=held))
+        assert a.pose.left_key == 'P' and not a.mouse_contact
+        contact_frame = None
+        pulses = []
+        pressed = False
+        for i in range(60):
+            now = 1 + i * dt
+            stamp = 1 if i < 13 else 1 + 13 * dt
+            pose = a.advance(dt, now, Activity(click=stamp, held=held))
+            if a.mouse_contact:
+                if contact_frame is None:
+                    contact_frame = i
+                assert pose.right_key == 'P' and pose.left_key is None
+                assert math.dist((pose.left_x, pose.left_y),
+                                 (kb.mouse_rest[0], kb.mouse_rest[1] + pose.click * .4)) < .01
+            if pose.click > .001:
+                assert a.mouse_contact and pose.left_pressure > 0
+                if not pressed:
+                    pulses.append(i)
+            pressed = pose.click > .001
+            assert pose.mouse_dx == pose.mouse_dy == 0
+        assert contact_frame is not None and 0 < contact_frame < pulses[0]
+        assert len(pulses) == 2 and 13 <= pulses[1] <= 14
+        assert not a.mouse_contact and a.paws[0].goal != 'mouse'
+
+
 def check_crossed_paws():
     kb = Keyboard(pointer='touchpad')
     art = CatArt(kb, Appearance('tuxedo'))  # Light toes and dark forelegs.
@@ -338,6 +371,7 @@ if __name__ == '__main__':
         check_geometry()
         check_distributions()
         check_touchpad()
+        check_stationary_click()
         check_crossed_paws()
         check_absent()
         check_priority()

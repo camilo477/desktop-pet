@@ -1,5 +1,9 @@
 Miga se abre como una aplicación de escritorio, sin instalar Python ni usar comandos. Incluye el icono de su cabeza original, negra con ojos dorados.
 
+## Clic con el cursor quieto
+
+Al hacer clic, Miga lleva la patita al mouse o al touchpad y pulsa al llegar. Si ya lo está tocando, pulsa directamente.
+
 ## Menor sensibilidad del mouse y del touchpad
 
 Miga mueve menos la patita cuando desplazas un poco el cursor. Un recorrido largo sigue permitiéndole llegar hasta el borde del mouse o del touchpad.

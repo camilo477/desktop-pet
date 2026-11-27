@@ -172,7 +172,7 @@ def check_motion_and_screens() -> None:
     assert {pose.left_key, pose.right_key} == {'A', 'P'}
     assert pose.pressed == chord.held
     pose = advance(1, Activity(keyboard=now, held=frozenset({'A', 'P', 'ShiftLeft'}), mouse=now))
-    # Only actual motion reserves the mouse paw; the other can reach P.
+    # Pointer activity reserves one paw; the other can reach P.
     pose = advance(.4, Activity(keyboard=now, mouse=now, held=frozenset({'P'}), latest=KeyHint('P', now)), (1, -1))
     assert pose.right_key == 'P' and pose.left_key is None
     assert animation.mouse_contact and math.dist((pose.left_x, pose.left_y), MOUSE_REST) < .1
@@ -181,7 +181,7 @@ def check_motion_and_screens() -> None:
     assert pose.mouse < .01 and abs(pose.left_x - LEFT_REST[0]) < .1
     assert abs(pose.head_x) < .1  # Attention leaves a stationary cursor.
     pose = advance(.3, Activity(click=now))
-    assert pose.mouse == 0 and abs(pose.left_x - LEFT_REST[0]) < .1
+    assert animation.mouse_contact and pose.click > 0
 
     # A brief Space survives between frames without a queued text sequence.
     pose = advance(.13, Activity(keyboard=now, pulses=frozenset({'Space'}), latest=KeyHint('Space', now)))

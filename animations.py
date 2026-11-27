@@ -13,6 +13,7 @@ from personality import CALM, CONTENT, CURIOUS, SURPRISED, Expression, Personali
 
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
+CLICK_DURATION = .18
 CURSOR_TRAVEL_TO_EDGE = 400.0  # Screen pixels from the center to one edge of either device.
 IDLE_ACTION_AFTER = 15.0
 RELAX_AFTER = 60.0
@@ -171,6 +172,7 @@ class Animations:
         self.mouse_target = [0.0, 0.0]
         self.mouse_velocity = [0.0, 0.0]
         self.mouse_contact = False
+        self.last_click = self.press_start = -math.inf
         self.focus_point = [105.0, 160.0]
         self.head_velocity = [0.0, 0.0, 0.0]
         self.pet_start = -10.0
@@ -245,6 +247,8 @@ class Animations:
         self.mouse_target[:] = (self.pose.mouse_dx, self.pose.mouse_dy)
         self.mouse_velocity[:] = (0.0, 0.0)
         self.mouse_contact = False
+        self.last_click = self.press_start = -math.inf
+        self.pose.click = 0
         for paw in self.paws:
             paw.key = paw.ready = None
 
@@ -286,6 +290,8 @@ class Animations:
         pose.contacts = ()
         pose.contact = pose.left_pressure = pose.right_pressure = 0
         self.mouse_contact = False
+        self.press_start = self.last_click = -math.inf
+        pose.click = 0
         self.mouse_target[:] = (pose.mouse_dx, pose.mouse_dy)
         self.mouse_velocity[:] = (0, 0)
         for index, paw in enumerate(self.paws):
@@ -313,6 +319,8 @@ class Animations:
         self.pose.left_pressure = self.pose.right_pressure = 0.0
         self.last_hint = -math.inf
         self.mouse_contact = False
+        self.last_click = self.press_start = -math.inf
+        self.pose.click = 0
         self.mouse_target[:] = (self.pose.mouse_dx, self.pose.mouse_dy)
         self.mouse_velocity[:] = (0.0, 0.0)
         for paw in self.paws:
@@ -571,12 +579,19 @@ class Animations:
         bout = (.5 - .5 * math.cos(self.tip_phase / 3))
         pose.tail_tip = expression.tail * math.sin(self.tip_phase) * bout * (1 - pose.sleep)
         pose.tail_tip -= 3.6 * roll
-        mouse_active = not self.carried and now - max(activity.mouse, activity.scroll) < MOUSE_HOLD
+        if not self.carried and activity.click > self.release_stamp and now - activity.click < MOUSE_HOLD:
+            self.last_click = max(self.last_click, activity.click)
+        mouse_active = not self.carried and (
+            now - max(activity.mouse, activity.scroll, self.last_click) < MOUSE_HOLD
+            or now - self.press_start < CLICK_DURATION)
         self.mouse_goal = approach(self.mouse_goal, float(mouse_active), 10, dt)
         pose.mouse = approach(pose.mouse, self.mouse_goal, 12, dt)
         self._mouse_motion(dt, activity, mouse_active)
-        age = now - activity.click
-        pose.click = math.sin(math.pi * age / .18) if not self.carried and 0 <= age < .18 else 0
+        # Consume the latest click only after the paw has reached the device.
+        if self.mouse_contact and self.last_click > self.press_start and now - self.last_click < MOUSE_HOLD:
+            self.press_start = max(self.last_click, now - dt)
+        age = now - self.press_start
+        pose.click = math.sin(math.pi * age / CLICK_DURATION) if self.mouse_contact and 0 <= age < CLICK_DURATION else 0
         if activity.scroll_x or activity.scroll_y:
             pose.scroll_direction = math.copysign(1, activity.scroll_y or activity.scroll_x)
             pose.scroll = min(1, pose.scroll + abs(activity.scroll_y or activity.scroll_x) * .4)
@@ -737,6 +752,6 @@ class Animations:
         pose.right_x, pose.right_y = self.paws[1].x, self.paws[1].y
         pose.left_key, pose.right_key = self.paws[0].key, self.paws[1].key
         pose.left_pressure, pose.right_pressure = self.paws[0].pressure, self.paws[1].pressure
-        if pose.touchpad and self.mouse_contact:
+        if self.mouse_contact:
             pose.left_pressure = max(pose.left_pressure, pose.click * .8)
         return pose
