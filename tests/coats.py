@@ -9,13 +9,15 @@ import time
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from animations import Pose
 from appearance import Appearance, COATS, EYES, NOSES
 from character import CatArt
+from anatomy import FACE_CAMERA_DISTANCE, FACE_RX, FACE_RY, FACE_DEPTH, FaceGeometry, face_depth
+from coat_patterns import FacePatch, PATTERNS, cubic_path, smooth_loop
 from personality import DROWSY, SURPRISED
 from pet import PetWindow
 
@@ -35,6 +37,9 @@ def check_render():
     art = CatArt()
     poses = (Pose(), Pose(head_x=.88, head_y=-.24, head_tilt=9, expression=SURPRISED,
                           tail_touch=.6, mouse=1, left_x=38, left_y=154),
+             Pose(head_y=-1), Pose(head_x=-1, head_y=-1, head_tilt=-12),
+             Pose(head_x=1, head_y=-1, head_tilt=12),
+             Pose(head_y=-1, expression=SURPRISED),
              Pose(sleep=1, blink=1, relax=1, zzz=1, time=.74, expression=DROWSY))
     for size in (150, 200, 300):
         for pose in poses:
@@ -66,6 +71,49 @@ def check_render():
         frame = painted(art, Pose(), 300)
         noses.append(bytes(frame.constBits()))
     assert len(set(noses)) == len(NOSES)
+
+
+def check_visible_markings():
+    # A material point inside a marking and facing the camera must retain its
+    # color. A straight closure between horizon crossings cut away these points.
+    poses = (Pose(head_y=-1), Pose(head_y=-1, head_x=-1), Pose(head_y=-1, head_x=1),
+             Pose(head_y=-1, expression=SURPRISED))
+    checked = 0
+    for pattern in ('piebald', 'patches', 'brindle', 'tabby'):
+        for _, points in PATTERNS[pattern].face:
+            source = cubic_path(smooth_loop(points))
+            patch = FacePatch(points)
+            samples = [(x, y, face_depth(x, y)) for x in range(-32, 33) for y in range(-27, 25)
+                       if x*x/FACE_RX**2 + y*y/FACE_RY**2 < .98
+                       and source.contains(QRectF(x - .3, y - .3, .6, .6))]
+            for pose in poses:
+                face = FaceGeometry(pose)
+                projected = patch.project(face)
+                camera = (-FACE_CAMERA_DISTANCE * face.sin_y,
+                          -FACE_CAMERA_DISTANCE * face.sin_p / face.cos_p,
+                          FACE_CAMERA_DISTANCE * face.cos_y)
+                for x, y, z in samples:
+                    normal = (x / FACE_RX**2, y / FACE_RY**2, z / FACE_DEPTH**2)
+                    toward_camera = sum(n * (c - v) for n, c, v in zip(normal, camera, (x, y, z)))
+                    if toward_camera < 2:
+                        continue  # Exclude the subpixel tangent and boundary band.
+                    assert projected.contains(QPointF(*face.point(x, y, z))), (pattern, pose, x, y)
+                    checked += 1
+    assert checked > 5000
+
+
+def check_continuity():
+    art = CatArt()
+    for coat in ('calico', 'bicolor', 'tortie', 'ginger'):
+        art.set_appearance(Appearance(coat))
+        neutral_image = painted(art, Pose(), 300)
+        neutral = bytes(neutral_image.constBits())
+        for pitch in (-.0001, .0001):
+            frame_image = painted(art, Pose(head_y=pitch), 300)
+            frame = bytes(frame_image.constBits())
+            # An almost stationary head must not suddenly replace large color areas.
+            difference = sum(abs(a - b) for a, b in zip(neutral, frame)) / 255
+            assert difference < 5, (coat, pitch, difference)
 
 
 def choose(w, submenu, title):
@@ -134,5 +182,7 @@ if __name__ == '__main__':
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, directory)
         check_render()
+        check_visible_markings()
+        check_continuity()
         check_preferences()
-    print('PASS: eleven painted coats, eye and nose choices, anatomical hits, transparency and live preferences.')
+    print('PASS: eleven coats, upward-facing markings, continuous turns, eye/nose choices, hits and preferences.')

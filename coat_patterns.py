@@ -6,7 +6,11 @@ import math
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainterPath, QRadialGradient, QTransform
 from PySide6.QtCore import Qt
 
-from anatomy import FACE_RX, FACE_RY, FACE_DEPTH, BodyGeometry, face_depth
+from anatomy import FACE_RX, FACE_RY, FACE_DEPTH, FACE_CAMERA_DISTANCE, BodyGeometry, face_depth
+
+
+FACE_RADII = (FACE_RX, FACE_RY, FACE_DEPTH)
+FACE_SAMPLE_STEP = .65
 
 
 def smooth_loop(points):
@@ -40,14 +44,14 @@ def surface(x, y):
 class FacePatch:
     def __init__(self, points):
         loop = smooth_loop(points)
-        self.controls = tuple(surface(*point) for point in loop)
-        self.max_x = max(abs(p[0]) for p in loop) / FACE_RX**2
-        self.max_y = max(abs(p[1]) for p in loop) / FACE_RY**2
-        self.min_z = min(p[2] for p in self.controls) / FACE_DEPTH**2
-        # Only a patch crossing the horizon needs its sampled boundary.
+        # Keep the same sampled boundary on both sides of the horizon. Switching
+        # from projected cubic controls to a coarse polygon made markings pop.
         contour = []
         for i in range(0, len(loop) - 1, 3):
-            for t in (0.0, 0.25, 0.50, 0.75):
+            length = sum(math.dist(loop[i + j], loop[i + j + 1]) for j in range(3))
+            steps = max(8, math.ceil(length / FACE_SAMPLE_STEP))
+            for step in range(steps):
+                t = step / steps
                 u = 1 - t
                 weights = (u**3, 3 * u * u * t, 3 * u * t * t, t**3)
                 contour.append(
@@ -57,29 +61,49 @@ class FacePatch:
 
     def project(self, face):
         nx, ny, nz = -face.sin_y * face.cos_p, -face.sin_p, face.cos_y * face.cos_p
-        if self.min_z * nz >= self.max_x * abs(nx) + self.max_y * abs(ny):
-            return cubic_path([face.point(*point) for point in self.controls])
-        # Clip against the turning ellipsoid before projecting. A hidden cheek
-        # must not fold back over the visible eye near the rim.
-        path = QPainterPath()
-        previous = self.contour[-1]
         nx, ny, nz = nx / FACE_RX**2, ny / FACE_RY**2, nz / FACE_DEPTH**2
-        prior = nx * previous[0] + ny * previous[1] + nz * previous[2]
-        for point in self.contour:
-            dot = nx * point[0] + ny * point[1] + nz * point[2]
+        # The perspective camera's tangent plane is offset from the origin.
+        # In unit-sphere coordinates its intersection is a small circle.
+        offset = face.cos_p / FACE_CAMERA_DISTANCE
+        normal = (nx * FACE_RX, ny * FACE_RY, nz * FACE_DEPTH)
+        length2 = sum(value * value for value in normal)
+        center = tuple(value * offset / length2 for value in normal)
+        radius = math.sqrt(1 - offset * offset / length2)
+        dots = [nx * x + ny * y + nz * z - offset for x, y, z in self.contour]
+        path = QPainterPath()
+        start = next((i for i, dot in enumerate(dots) if dot >= 0), None)
+        if start is None:
+            return path
+        previous, prior = self.contour[start], dots[start]
+        path.moveTo(*face.point(*previous))
+        horizon_start = None
+        for index in range(start + 1, start + len(self.contour) + 1):
+            point, dot = self.contour[index % len(self.contour)], dots[index % len(dots)]
             if (prior < 0) != (dot < 0):
                 t = prior / (prior - dot)
-                edge = face.point(*(a + (b - a) * t for a, b in zip(previous, point)))
-                if path.elementCount():
-                    path.lineTo(*edge)
+                unit = [(a + (b - a) * t) / scale - c
+                        for a, b, scale, c in zip(previous, point, FACE_RADII, center)]
+                norm = math.hypot(*unit)
+                unit = [value / norm for value in unit]
+                if dot < 0:
+                    horizon_start = unit
                 else:
-                    path.moveTo(*edge)
+                    # The hidden part ends on a curved horizon, not the chord
+                    # between its two crossings through the visible forehead.
+                    cosine = sum(a * b for a, b in zip(horizon_start, unit))
+                    angle = math.acos(max(-1., min(1., cosine)))
+                    steps = max(1, math.ceil(angle * radius * max(FACE_RADII) / FACE_SAMPLE_STEP))
+                    for step in range(1, steps):
+                        fraction = step / steps
+                        middle = [a + (b - a) * fraction for a, b in zip(horizon_start, unit)]
+                        length = math.hypot(*middle)
+                        edge = ((c + value / length * radius) * scale
+                                for value, c, scale in zip(middle, center, FACE_RADII))
+                        path.lineTo(*face.point(*edge))
+                edge = ((c + value * radius) * scale for value, c, scale in zip(unit, center, FACE_RADII))
+                path.lineTo(*face.point(*edge))
             if dot >= 0:
-                xy = face.point(*point)
-                if path.elementCount():
-                    path.lineTo(*xy)
-                else:
-                    path.moveTo(*xy)
+                path.lineTo(*face.point(*point))
             previous, prior = point, dot
         path.closeSubpath()
         return path

@@ -4,6 +4,7 @@ import math
 
 MAX_REACH = 78.0
 FACE_RX, FACE_RY, FACE_DEPTH = 35, 28, 23
+FACE_CAMERA_DISTANCE = 240
 EAR_ANCHORS = {-1: (82, 57), 1: (125, 57)}
 
 
@@ -101,7 +102,7 @@ class FaceGeometry:
         horizontal = x * self.cos_y + depth * self.sin_y
         forward = depth * self.cos_y - x * self.sin_y
         vertical = y * self.cos_p + forward * self.sin_p
-        perspective = 1 / (1 - forward / 240)
+        perspective = 1 / (1 - forward / FACE_CAMERA_DISTANCE)
         return self._screen(horizontal * perspective, vertical * perspective)
 
     def outline(self, x, y):
