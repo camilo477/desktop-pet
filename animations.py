@@ -13,6 +13,7 @@ from personality import CALM, CONTENT, CURIOUS, SURPRISED, Expression, Personali
 
 MOUSE_PAW = 0  # Screen left is the cat's anatomical right.
 MOUSE_HOLD = .5
+CURSOR_TRAVEL_TO_EDGE = 400.0  # Screen pixels from the center to one edge of either device.
 IDLE_ACTION_AFTER = 15.0
 RELAX_AFTER = 60.0
 SLEEP_AFTER = 180.0
@@ -443,12 +444,11 @@ class Animations:
         positions = [pose.mouse_dx, pose.mouse_dy]
         moving = active and (activity.motion_x != 0 or activity.motion_y != 0)
         # Turn screen motion into the cat's peripheral plane on both axes.
-        gains = (-.055, -.035) if pose.touchpad else (-.11, -.10)
-        for axis, (motion, gain, limit) in enumerate(zip(
-                (activity.motion_x, activity.motion_y), gains, self.keyboard.pointer_limits)):
+        for axis, (motion, limit) in enumerate(zip(
+                (activity.motion_x, activity.motion_y), self.keyboard.pointer_limits)):
             position = positions[axis]
             target, velocity = self.mouse_target[axis], self.mouse_velocity[axis]
-            delta = motion * gain if active else 0
+            delta = -motion * limit / CURSOR_TRAVEL_TO_EDGE if active else 0
             if delta:
                 # A reversal starts from the painted object, not an unfinished reach.
                 if delta * (target - position) < 0:

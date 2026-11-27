@@ -1,5 +1,9 @@
 Miga se abre como una aplicación de escritorio, sin instalar Python ni usar comandos. Incluye el icono de su cabeza original, negra con ojos dorados.
 
+## Menor sensibilidad del mouse y del touchpad
+
+Miga mueve menos la patita cuando desplazas un poco el cursor. Un recorrido largo sigue permitiéndole llegar hasta el borde del mouse o del touchpad.
+
 ## Cruce de patitas en el touchpad
 
 Cuando Miga escribe y usa el touchpad a la vez, la pata izquierda que teclea pasa por encima de la derecha que está sobre el touchpad.
