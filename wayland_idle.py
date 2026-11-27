@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from pathlib import Path
 import socket
 import struct
 import time
@@ -34,6 +35,27 @@ def compositor_pid():
     with connect_display() as client:
         credentials = client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
         return struct.unpack('3i', credentials)[0]
+
+
+def compositor_matches(pid):
+    """KWin's launcher owns its socket and passes the listening fd to its child."""
+    peer = compositor_pid()
+    if not isinstance(pid, int) or pid <= 0 or peer <= 0:
+        return False
+    if pid == peer:
+        return True
+    try:
+        process = Path('/proc') / str(pid)
+        launcher = Path('/proc') / str(peer)
+        # KWin may hold CAP_SYS_NICE: /proc/<kwin>/exe can be unreadable even
+        # to its own user. Its public parent PID and the wrapper are sufficient.
+        if launcher.joinpath('exe').resolve(strict=True).name != 'kwin_wayland_wrapper':
+            return False
+        parents = [line.split()[1] for line in process.joinpath('status').read_text().splitlines()
+                   if line.startswith('PPid:')]
+        return parents == [str(peer)]
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 async def observe(report):

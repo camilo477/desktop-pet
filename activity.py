@@ -226,6 +226,17 @@ class ActivityMonitor:
         with self._lock:
             self._global_position = None
 
+    def pointer_delta(self, dx, dy):
+        """Relative hardware movement when desktop cursor coordinates are unavailable."""
+        with self._lock:
+            if not self.enabled or self._dragging or not (dx or dy):
+                return
+            self._pointer_distance += math.hypot(dx, dy)
+            self._motion[0] = max(-240, min(240, self._motion[0] + dx))
+            self._motion[1] = max(-240, min(240, self._motion[1] + dy))
+            self._activity = replace(self._activity, mouse=time.monotonic())
+            self._notify()
+
     def set_dragging(self, dragging):
         # Keep each listener's last coordinate current while the window moves.
         # The next genuine movement then starts at the release position.

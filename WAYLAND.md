@@ -6,6 +6,54 @@ you work elsewhere and wake when you return. **Local** means that its sleep
 clock follows the activity it receives in its own window. Petting, dragging,
 appearance, manual keyboards and the context menu work in either mode.
 
+KDE cursor tracking now drives Miga's eyes and mouse paw in other applications.
+Physical keyboard, buttons and scroll are supported through read-only evdev
+access after explicit device authorization. The menu reports actual connected
+keyboards and pointer sources. The historical compositor matrix below predates
+this optional physical input backend.
+
+## Physical input
+
+The Wayland backend opens authorized devices read-only with `evdev >= 2.0`.
+Physical key positions feed the same animation as X11: no characters are
+decoded, no input history is written, and no events are intercepted or injected.
+Simultaneous keys and keyboards, immediate releases, both wheel axes, high
+resolution wheels, input buffer overflow and device removal are handled.
+KDE supplies global cursor coordinates in logical pixels, including across
+rotated and offset monitors; raw relative mouse motion is a fallback elsewhere.
+Pausing or disabling reactions closes the device handles. Devices also close
+when the login session becomes inactive or locked, checked once per second.
+Automatic reopening and device discovery use the same one-second interval.
+
+Fedora normally restricts input devices to root and the input group. The optional
+helper below grants a specific normal user **read access only to selected USB
+keyboard/mouse models**. This permission is available to other processes under
+that user account as well, not exclusively to Miga. Miga itself stays unprivileged.
+A udev rule preserves the selection across reboot and reconnect; it does not
+add the user to the input group or grant device write access.
+
+For the SONiX `0c45:672e` keyboard and Logitech `046d:c246` mouse tested here,
+review the change first, then authorize it through the desktop password prompt:
+
+```sh
+python3 scripts/wayland_input_access.py plan --uid "$(id -u)" --device 0c45:672e --device 046d:c246
+pkexec /usr/bin/python3 -I "$PWD/scripts/wayland_input_access.py" install --uid "$(id -u)" --device 0c45:672e --device 046d:c246
+```
+
+Use the actual USB vendor/product IDs for other devices. Running
+`udevadm info --query=property --name=/dev/input/eventN` shows `ID_VENDOR_ID` and `ID_MODEL_ID`.
+To remove the rule and current read grants, run the same command with `remove`
+in place of `install`, then restart Miga. The helper does not run automatically
+during ordinary installation or startup.
+
+`.venv/bin/python tests/linux_input.py` exercises physical input and cursor
+delivery through the animation controller without reading the host's keyboard.
+After authorization, `.venv/bin/python tests/linux_input_native.py --observe-seconds 30`
+checks read-only device access and reports only which event categories reach the
+animation controller. It never prints key identities, typed text or event history.
+[Linux input events](https://docs.kernel.org/input/event-codes.html) ·
+[python-evdev read-only devices](https://python-evdev.readthedocs.io/en/latest/apidoc.html).
+
 ## What has been checked
 
 | Capability | GNOME Shell 46, Ubuntu 24.04, nested | KWin 6.6.7, Ubuntu 26.04, virtual output | Weston 13, headless kiosk | Sway, Hyprland and other compositors |
@@ -18,9 +66,13 @@ appearance, manual keyboards and the context menu work in either mode.
 | Always-on-top and exact placement | Raising the other window covered Miga with the hint both on and off | Compositor policy. Stacking pending | Kiosk shell controls placement | Compositor policy |
 | Fractional scaling | Logical geometry, masks and frame sizes checked at five Qt scale factors | Physical mixed-DPI checks pending | Physical mixed-DPI checks pending | Pending |
 
-KWin ran in an isolated standard GitHub runner. Testing a complete Fedora KDE
-session, other GNOME versions, physical monitor hotplug and different monitor
-scales on one desktop remains useful. [Native KWin checks](https://github.com/camilo477/desktop-pet/actions/workflows/wayland.yml).
+The original KWin checks ran in an isolated GitHub runner. Additional native
+checks on Fedora 44 KDE verified placement on a 1080 × 1920 portrait output
+at (0, 0) and a 1920 × 1080 landscape output at (1080, 1052), both at 100% scale.
+They cover switching outputs, all three sizes, actual keep-above state, saved
+position across reopening, idle notifications and the KDE keyboard source.
+Physical hotplug, physical dragging and mixed monitor scales still need manual
+checks. [Native KWin checks](https://github.com/camilo477/desktop-pet/actions/workflows/wayland.yml).
 
 ## Idle and wake
 
@@ -41,7 +93,7 @@ session, which matters on nested desktops. An unavailable provider drops out
 and can be rediscovered while Miga runs. Losing Qt's entire display connection
 can require relaunching Miga. [Mutter IdleMonitor interface](https://github.com/GNOME/mutter/blob/main/data/dbus-interfaces/org.gnome.Mutter.IdleMonitor.xml).
 
-A resume carries no key identity, pointer displacement or typing rate. The
+A general-activity resume carries no key identity, pointer displacement or typing rate. The
 animation wakes without striking a key or reaching for the mouse. Pausing or
 turning off **Reaccionar a actividad** disconnects the observers. Pausing also
 stops the frame timer. Miga keeps the current idle state in memory and uses
@@ -76,11 +128,29 @@ reported drag motion, Miga also releases the visual pose if Qt still reports a
 pressed button. A long stationary hold can look released in that case. The
 compositor continues to control the actual move. [Qt system moves](https://doc.qt.io/qt-6/qwindow.html#startSystemMove).
 
-Miga remembers the last output as a placement hint. It leaves final placement
-and monitor removal to the compositor and preserves the saved X11 coordinates.
-**Siempre visible** sends Qt's normal stacking hint. A layer-shell panel would
-need a different surface role and different movement rules. Miga keeps its
-movable toplevel and reserves no panel space. [XDG shell surface roles](https://gitlab.freedesktop.org/wayland/wayland-protocols/-/blob/main/stable/xdg-shell/xdg-shell.xml).
+On KDE, Miga loads a temporary KWin script that only manages its own process's
+Miga toplevel. **Pantalla** selects an output, **Siempre visible** sets the
+actual keep-above state, and saved coordinates are relative to that output's
+usable area. The script reports real position and drag release, clamps after
+resizing and output changes, and unloads on normal shutdown. It does not install
+window rules, reserve panel space, alter other windows or require administrator
+privileges. It remains connected while animations are paused. If scripting is
+unavailable, native dragging remains available. [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/).
+
+KDE's launcher can create the Wayland socket before starting KWin. Miga accepts
+that verified parent-child relationship as well as a direct compositor socket;
+it still rejects an unrelated desktop sharing the session bus. This also fixes
+automatic keyboard detection on Fedora's normal Plasma session.
+[KWin Wayland launcher](https://github.com/KDE/kwin/blob/master/src/helpers/wayland_wrapper/kwin_wrapper.cpp).
+
+Other Wayland compositors retain control of placement and stacking. Miga uses
+native dragging, remembers the last output as a hint and preserves saved X11
+coordinates separately. [XDG shell surface roles](https://gitlab.freedesktop.org/wayland/wayland-protocols/-/blob/main/stable/xdg-shell/xdg-shell.xml).
+
+Run `.venv/bin/python tests/screens.py` for isolated placement and launcher
+regressions. On a KDE Wayland desktop,
+`.venv/bin/python tests/kwin_desktop.py --desktop` shows disposable test windows on each output and verifies native
+placement using separate preferences; it does not move an existing Miga.
 
 The normal Linux installer tries optional binary wheels for `pywayland` and
 `dbus-next` independently inside the project environment. Missing PyWayland

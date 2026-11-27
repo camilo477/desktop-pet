@@ -132,13 +132,24 @@ class WaylandActivity(QObject):
     def menu(self, parent):
         menu = parent.addMenu('Wayland')
         source, _ = self.selected()
-        mode = 'Actividad general' if source else 'Local'
+        hardware = self.pet.linux_input
+        placement = self.pet.kwin
+        mode = ('Entrada física' if hardware and hardware.keyboard_count else
+                'Actividad general' if source else 'Local')
         if not self.session:
             mode += ' · observación desactivada'
-        for label in (f'Modo · {mode}', 'Teclas, puntero y scroll globales · no disponibles',
+        keyboard = f'{hardware.keyboard_count} dispositivo(s)' if hardware and hardware.keyboard_count else 'sin permiso de lectura'
+        pointer = 'KDE' if placement and placement.active and placement.pointer_enabled else 'local'
+        scroll = 'activo' if hardware and hardware.pointer_count else 'local'
+        for label in (f'Modo · {mode}', f'Teclado físico · {keyboard}',
+                      f'Puntero · {pointer} · Scroll · {scroll}',
                       f'Inactividad · {source or "sin observador activo"}',
                       f'Distribución · {self.layout_source or "sin fuente disponible"}'):
             menu.addAction(label).setEnabled(False)
+        if hardware and hardware.error:
+            menu.addAction(hardware.error).setEnabled(False)
+        if placement and placement.active:
+            menu.addAction(f'Ubicación · KDE · {placement.screen_name}').setEnabled(False)
         def details():
             drag = {True: 'aceptado', False: 'rechazado', None: 'sin probar'}.get(self.drag_accepted)
             shape = 'anunciadas' if 'wl_compositor' in self.surface else 'gestionadas por Qt'
@@ -146,10 +157,15 @@ class WaylandActivity(QObject):
                      if 'wp_fractional_scale_manager_v1' in self.surface else '')
             layer = ('Ofrece capas, pero Miga utiliza una ventana móvil. '
                      if 'zwlr_layer_shell_v1' in self.surface else '')
+            placement_info = ('La integración con KDE guarda la posición, permite elegir pantalla '
+                              'y aplica Siempre visible. '
+                              if placement and placement.active else
+                              'El compositor decide la ubicación y si mantiene la ventana encima. ')
             QMessageBox.information(self.pet, 'Miga en Wayland',
                 f'Arrastre nativo {drag}. Regiones de entrada {shape}. {scale}{layer}'
-                'El compositor decide la ubicación y si mantiene la ventana encima. '
+                + placement_info +
                 'Las caricias, los pelajes y el teclado manual siguen disponibles. '
-                'La actividad general regula el sueño sin identificar teclas ni movimientos. '
+                'La entrada física autorizada anima las teclas, el ratón y el scroll. '
+                'Sin permiso de lectura, la actividad general regula el sueño. '
                 'En modo local, Miga cuenta la actividad que recibe en su ventana.')
         menu.addAction('Información…', details)

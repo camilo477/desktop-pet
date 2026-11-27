@@ -57,6 +57,8 @@ class PetWindow(QWidget):
         self.mask_supported = platform in ("xcb", "cocoa") or platform.startswith("wayland")
         self.native_wayland = platform.startswith("wayland")
         self.wayland = None
+        self.kwin = None
+        self.linux_input = None
         self.native_windows = platform == "windows"
         self.windows_input = None
         self.global_input = supports_global_input(platform)
@@ -152,8 +154,50 @@ class PetWindow(QWidget):
             from macos_window import prepare_panel
             prepare_panel(self)
             self.mac_input = MacInput(self.activity, self.mac_status_changed)
+        if self.native_wayland:
+            from kwin_window import KWinWindow
+            from linux_input import LinuxInput
+            self.kwin = KWinWindow(self)
+            self.linux_input = LinuxInput(self)
+            QTimer.singleShot(0, self.kwin, self.kwin.start)
         self.render_frame()
         self.refresh_activity()
+
+    def primary_screen_name(self):
+        screen = QApplication.primaryScreen()
+        return screen.name() if screen else ''
+
+    def window_position(self):
+        if self.kwin and self.kwin.active and self.kwin.position is not None:
+            return self.kwin.position
+        return self.pos()
+
+    def move_to_screen(self, name):
+        screen = next((s for s in QApplication.screens() if s.name() == name), None)
+        if screen is None:
+            return  # The output may have been unplugged while the menu was open.
+        if self.native_wayland:
+            if self.kwin and self.kwin.active:
+                self.kwin.apply('screen', name)
+            return
+        area = screen.availableGeometry()
+        self.move(visible_position(QPoint(area.right() - self.width() - 23,
+                                         area.bottom() - self.height() - 11),
+                                   self.size(), [area]))
+        self.save_preferences()
+
+    def screen_menu(self, parent):
+        screens = QApplication.screens()
+        current = (self.kwin.screen_name if self.kwin and self.kwin.active else
+                   self.screen().name() if self.screen() else '')
+        choices = {s.name(): f'{s.name()} · {s.geometry().width()} × {s.geometry().height()}'
+                   for s in screens}
+        self.choice_menu(parent, 'Pantalla', choices, current, self.move_to_screen)
+        menu = parent.actions()[-1].menu()
+        if self.native_wayland and not (self.kwin and self.kwin.active):
+            for action in menu.actions():
+                action.setEnabled(False)
+            menu.addAction('Arrastra Miga a la pantalla deseada').setEnabled(False)
 
     def mac_status_changed(self, status):
         from macos_window import permission_notice
@@ -178,6 +222,10 @@ class PetWindow(QWidget):
 
     def refresh_activity(self) -> None:
         self.activity.set_enabled(self.reactions and not self.paused)
+        if self.kwin:
+            self.kwin.configure_pointer(self.activity.enabled)
+        if self.linux_input:
+            self.linux_input.configure(self.activity.enabled)
         if self.wayland:
             self.wayland.configure(self.activity.enabled)
         if self.windows_input:
@@ -211,8 +259,9 @@ class PetWindow(QWidget):
             self.local_pointer = None
         cursor_point = self.local_pointer
         if self.reactions and now - activity.mouse < .65:
-            if self.global_input and (not self.mac_input or self.activity.native_pointer):
-                cursor = QCursor.pos() - self.pos()
+            kwin_pointer = self.kwin.pointer if self.kwin and self.kwin.active else None
+            if kwin_pointer is not None or (self.global_input and (not self.mac_input or self.activity.native_pointer)):
+                cursor = (kwin_pointer if kwin_pointer is not None else QCursor.pos()) - self.window_position()
                 cursor_point = QPointF(cursor) * (200 / self.width())
                 screen = self.screen() or QApplication.primaryScreen()
                 if screen:
@@ -383,7 +432,7 @@ class PetWindow(QWidget):
 
     def begin_drag_motion(self):
         self.animations.lift(time.monotonic())
-        self.drag_sample = self.pos()
+        self.drag_sample = self.window_position()
         self.drag_space = (self.screen(), self.devicePixelRatioF(), self.width())
 
     def moveEvent(self, event):
@@ -394,7 +443,7 @@ class PetWindow(QWidget):
     def sample_drag(self, now):
         # Move events preserve turns between paints. A tick can also observe a
         # compositor position update. Both consume the same logical origin.
-        position = self.pos()
+        position = self.window_position()
         motion = position - self.drag_sample
         space = (self.screen(), self.devicePixelRatioF(), self.width())
         if space != self.drag_space:
@@ -407,7 +456,9 @@ class PetWindow(QWidget):
         self.drag_sample = position
 
     def wheelEvent(self, event) -> None:
-        if not self.activity.global_pointer_active:
+        global_scroll = (bool(self.linux_input and self.linux_input.pointer_count)
+                         if self.native_wayland else self.activity.global_pointer_active)
+        if not global_scroll:
             delta = event.angleDelta()
             pixels = event.pixelDelta()
             self.activity.pointer_scrolled(delta.x() / 120 or pixels.x() / 20,
@@ -436,6 +487,8 @@ class PetWindow(QWidget):
     def check_native_release(self) -> None:
         if not self.system_drag or self.native_anchor is None:
             return
+        if self.kwin and self.kwin.active:
+            return  # KWin reports the actual release, even during a stationary hold.
         quiet = time.monotonic() - self.native_motion_time if self.native_motion_time is not None else 0.
         # Qt may clear its button state at handoff, or retain a stale pressed
         # bit if the compositor consumes release. Expire only our visual grip.
@@ -491,6 +544,10 @@ class PetWindow(QWidget):
 
     def set_always_on_top(self, checked: bool) -> None:
         self.always_on_top = checked
+        if self.kwin and self.kwin.active:
+            self.kwin.apply()
+            self.save_preferences()
+            return
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
         self.show()
         if self.windows_input and self.activity.enabled:
@@ -523,7 +580,7 @@ class PetWindow(QWidget):
     def save_preferences(self) -> None:
         if not self.native_wayland:
             self.settings.setValue("position", self.pos())
-        elif self.screen() and self.screen().name():
+        elif not (self.kwin and self.kwin.active) and self.screen() and self.screen().name():
             self.settings.setValue("wayland/screen", self.screen().name())
         for key, value in (("size", self.width()),
                            ("always_on_top", self.always_on_top),
@@ -619,6 +676,7 @@ class PetWindow(QWidget):
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
         self.choice_menu(menu, "Tamaño", SIZES, self.width(), self.set_size)
+        self.screen_menu(menu)
         self.keyboard_menu(menu)
         self.appearance_menu(menu)
         if self.wayland:
@@ -676,6 +734,8 @@ class PetWindow(QWidget):
         if self.native_mac:
             self.timer.detach()
         self.position_timer.stop()
+        if self.linux_input:
+            self.linux_input.configure(False)
         if self.windows_input:
             self.windows_input.configure(None)
         if self.wayland:
@@ -684,6 +744,8 @@ class PetWindow(QWidget):
             self.mac_input.close()
         self.activity.stop()
         self.save_preferences()
+        if self.kwin:
+            self.kwin.close()
         if self._menu is not None:
             self._menu.close()
 

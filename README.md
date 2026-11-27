@@ -10,7 +10,7 @@ appearances, gestures and animation code.
 | Platform | Available integration | Automated and native checks | Hands-on validation remaining |
 | --- | --- | --- | --- |
 | Linux X11 | Global physical input and XKB | Native X11 input, Qt rendering and launcher | Additional desktops and monitor arrangements |
-| Linux Wayland | Seat idle and wake when available, KDE layout or single configured GNOME source, local interaction | Native nested GNOME 46, virtual KWin 6.6 and headless Weston 13 | Fedora KDE desktop, mixed physical scales and hotplug |
+| Linux Wayland | Physical input with explicit evdev read permission, KDE cursor/layout/placement, seat idle and wake | Native Fedora 44 KDE with two offset portrait/landscape outputs, nested GNOME 46, virtual KWin 6.6 and headless Weston 13 | Mixed physical scales and physical hotplug |
 | Windows x64 | Raw Input, installer and portable folder | Windows Server 2025 x64, native input and packaging | Windows 11/10 client desktops and hardware |
 | macOS arm64 and x86_64 | Cocoa panel, optional Quartz input, Finder app and CLI | macOS 15 on both architectures, synthetic input through the session tap, transparent hit targets, app builds and local IPC | Granting and revoking permission, physical input devices, Secure Input, Spaces and mixed-DPI displays |
 
@@ -23,7 +23,7 @@ appearances, gestures and animation code.
   Each keycap supplies the target for the paw and the highlight for a press.
 - Peripherals face the cat: the space bar is nearest its paws and its right-hand
   mouse appears on the viewer's left.
-- Actual key presses, holds and releases on X11, Windows and permitted macOS sessions, including simultaneous keys.
+- Actual key presses, holds and releases on X11, Windows, permitted macOS sessions and Wayland with authorized device read access, including simultaneous keys.
 - On native Wayland, a compositor idle notification can keep Miga awake while you work in another window. The **Wayland** submenu shows the current capabilities.
 - Both paws participate in typing; one can keep using the mouse while the other types.
 - Typing speed follows actual press cadence and reach distance, with continuous
@@ -189,8 +189,18 @@ actual window displacement from the compositor. When positions are hidden,
 the pet keeps its suspended pose. Empty areas pass clicks where supported.
 
 The right-click menu offers **Tamaño** (150, 200 or 300
-logical pixels), **Teclado**, **Apariencia**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
+logical pixels), **Pantalla**, **Teclado**, **Apariencia**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
+
+**Pantalla** moves Miga to the selected monitor on X11, Windows, macOS and
+KDE Wayland. KDE placement remembers the position within the monitor's usable
+area, handles portrait and offset outputs, keeps resized windows on screen and
+applies **Siempre visible** through a temporary KWin script scoped to Miga's
+own process. Other Wayland desktops use native dragging. KDE's cursor position
+drives Miga's gaze and mouse paw across monitors. On Wayland, reading physical
+keys, mouse buttons and scroll requires explicit device read permission; see
+[Wayland input setup](WAYLAND.md#physical-input). Without it, KDE pointer
+tracking and general activity still work.
 
 Pausing stops the animation timer and input listeners while keeping dragging
 and menu controls available. Disabling activity reactions stops global input
@@ -309,9 +319,11 @@ represented positions. Small legends appear as the rendering resolution permits.
   available, its sleep clock follows local interactions. KDE can supply the
   active keyboard group. On GNOME a single configured XKB source can supply
   the legends. The keyboard menu always offers manual selection.
-- Global physical keys, pointer motion and scrolling in other applications are
-  unavailable in Wayland sessions, including when Qt runs under XWayland.
-  Native Wayland uses the compositor for dragging and final window placement.
+- Authorized evdev devices supply physical keys, pointer motion, buttons and
+  scroll on native Wayland. KDE supplies global logical cursor coordinates,
+  monitor selection and remembered placement. Other desktops retain compositor
+  placement and use relative hardware movement for the mouse paw.
+  XWayland does not enable the X11 RECORD hooks in a Wayland session.
   See the [Wayland compatibility table and desktop checks](WAYLAND.md).
 
 ## Known limitations

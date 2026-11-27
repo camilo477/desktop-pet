@@ -30,6 +30,8 @@ jobs:
             ln -s "$lib" "$stage/native/"
           done
           LD_LIBRARY_PATH="$stage/native" .venv/bin/python tests/wayland.py
+          LD_LIBRARY_PATH="$stage/native" .venv/bin/python tests/screens.py
+          LD_LIBRARY_PATH="$stage/native" .venv/bin/python tests/linux_input.py
       - name: Exercise a private KWin session
         run: |
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/miga-runtime" XDG_CONFIG_HOME="$RUNNER_TEMP/miga-config"
@@ -52,4 +54,5 @@ jobs:
               sleep .2
             done
             LD_LIBRARY_PATH="$RUNNER_TEMP/kwin/native" QT_QPA_PLATFORM=wayland .venv/bin/python tests/kwin.py
+            LD_LIBRARY_PATH="$RUNNER_TEMP/kwin/native" QT_QPA_PLATFORM=wayland .venv/bin/python tests/kwin_desktop.py --desktop
           '

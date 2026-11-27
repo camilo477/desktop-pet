@@ -53,7 +53,7 @@ def check_window() -> None:
     assert pet.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     menu = pet.build_menu()
     assert [action.text() for action in menu.actions()] == [
-        "Tamaño", "Teclado", "Apariencia", "Siempre visible", "Reaccionar a actividad", "Pausar animaciones", "Salir",
+        "Tamaño", "Pantalla", "Teclado", "Apariencia", "Siempre visible", "Reaccionar a actividad", "Pausar animaciones", "Salir",
     ]
     for size in (150, 300, 200):
         pet.set_size(size)
@@ -68,7 +68,7 @@ def check_window() -> None:
     QTest.qWait(100)
     assert pet.animations.time == before and not pet.timer.isActive()
     assert not pet.activity.enabled
-    assert pet.build_menu().actions()[5].text() == "Reanudar animaciones"
+    assert pet.build_menu().actions()[6].text() == "Reanudar animaciones"
     pet.move(100, 100)
     start = pet.pos()
     QTest.mousePress(pet, Qt.MouseButton.LeftButton, pos=QPoint(95, 95))

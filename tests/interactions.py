@@ -269,6 +269,17 @@ def check_drag(window):
         window.check_native_release()
     assert not window.dragging and not window.timer.isActive()
 
+    # A real KWin release notification supersedes the approximate Qt timeout.
+    window.system_drag = window.dragging = True
+    window.native_anchor = anchor
+    window.native_motion_time = time.monotonic() - 31
+    with patch.object(window, 'kwin') as placement:
+        placement.active = True
+        with patch.object(QApplication, 'mouseButtons', return_value=Qt.MouseButton.NoButton):
+            window.check_native_release()
+        assert window.dragging
+    window.finish_drag()
+
 
 def trace_while_lifted(path, fps=30, duration=3.2):
     a = Animations()

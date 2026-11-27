@@ -7,7 +7,7 @@ import time
 
 from animations import IDLE_ACTION_AFTER
 from keyboard_distributions import detected_layout
-from wayland_idle import compositor_pid
+from wayland_idle import compositor_matches
 
 
 class Unavailable(Exception):
@@ -118,7 +118,7 @@ async def service(kind, report):
         # Its idle clock and layout would describe the wrong seat.
         compositor = await daemon('GetNameOwner', 's', compositor_service)
         pid = await daemon('GetConnectionUnixProcessID', 'u', compositor)
-        if pid != compositor_pid():
+        if not compositor_matches(pid):
             raise Unavailable()
         owner = compositor if name == compositor_service else await daemon('GetNameOwner', 's', name)
         match = f"type='signal',sender='{owner}',path='{path}',interface='{interface}'"
