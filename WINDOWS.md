@@ -2,7 +2,15 @@
 
 Miga está preparado para Windows 11 x64 y Windows 10 x64 desde la versión 1809 con una versión de Qt compatible. Las pruebas automáticas utilizan Windows Server x64. La valoración visual, los dispositivos físicos y los cambios de monitor o de sesión requieren un escritorio cliente. [Ejecuciones de las pruebas nativas](https://github.com/camilo477/desktop-pet/actions/workflows/windows.yml).
 
-## Instalar
+## Descargar la aplicación
+
+1. Abre [Releases](https://github.com/camilo477/desktop-pet/releases) y descarga **Miga-Windows-x64.zip** en Assets / Recursos.
+2. Clic derecho en el ZIP → **Extraer todo**. Conserva la carpeta completa `Miga`, incluida `_internal`.
+3. Abre **Miga.exe** con doble clic. Puedes crear un acceso directo en el escritorio.
+
+El paquete incluye Python y sus dependencias; no necesitas instalar herramientas ni usar comandos. Para cerrar, clic derecho sobre Miga → **Salir**. Para actualizar, ciérrala y reemplaza la carpeta completa con la nueva versión. Para desinstalar, ciérrala y elimina la carpeta y tus accesos directos. Tus preferencias permanecen guardadas.
+
+## Instalar desde el código
 
 1. Instala Python 3.12 de 64 bits con su lanzador para Windows. [Descargas oficiales de Python](https://www.python.org/downloads/windows/).
 2. Descarga el [ZIP de la rama main](https://github.com/camilo477/desktop-pet/archive/refs/heads/main.zip), extrae todos los archivos y conserva la carpeta en una ubicación de tu usuario. También puedes actualizar una copia Git existente.

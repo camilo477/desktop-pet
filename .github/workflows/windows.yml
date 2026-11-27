@@ -1,5 +1,7 @@
 name: Windows native checks
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 
@@ -49,7 +51,10 @@ jobs:
         working-directory: Miga prueba ñ
         run: |
           .\windows\build.ps1
-          .\.venv-win\Scripts\python.exe tests/windows_launcher.py "$pwd\dist\Miga\Miga.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\.venv-win\Scripts\python.exe -c "import shutil; shutil.make_archive('dist/Miga-Windows-x64', 'zip', 'dist', 'Miga'); shutil.unpack_archive('dist/Miga-Windows-x64.zip', 'dist/unpacked')"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\.venv-win\Scripts\python.exe tests/windows_launcher.py "$pwd\dist\unpacked\Miga\Miga.exe"
           exit $LASTEXITCODE
       - name: Check reinstall and uninstall
         working-directory: Miga prueba ñ
@@ -63,3 +68,9 @@ jobs:
           if ([Environment]::GetEnvironmentVariable('Path', 'User').Split(';') -contains "$pwd\windows\bin") { throw 'Owned PATH entry remains' }
           $prefs = 'HKCU:\Software\desktop-pet\mascota'
           if ((Get-ItemPropertyValue $prefs size) -ne 150 -or (Get-ItemPropertyValue "$prefs\appearance" coat) -ne 'calico' -or (Get-ItemPropertyValue "$prefs\keyboard" format) -ne '65') { throw 'Reinstall or uninstall lost preferences' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Miga-Windows-x64
+          path: Miga prueba ñ/dist/Miga-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0

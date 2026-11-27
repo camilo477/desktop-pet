@@ -1,6 +1,7 @@
 """Qt GUI lifetime and the two-command, user-only local control channel."""
 
 import sys
+from pathlib import Path
 from PySide6.QtCore import QIODevice, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
@@ -30,10 +31,12 @@ def request(server_name: str, command: bytes) -> bytes | None:
 
 
 def run_pet(server_name, on_ready):
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
     from pet import PetWindow
 
     app = QApplication([sys.argv[0]])
+    app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / 'assets/icons/miga.png')))
     app.setQuitOnLastWindowClosed(False)
     server = QLocalServer(app)
     pet = None

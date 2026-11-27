@@ -84,6 +84,7 @@ if ($env:MIGA_INSTALL_ACTION -eq 'install') {
     $link.TargetPath = $env:MIGA_INSTALL_PYTHONW
     $link.Arguments = $arg
     $link.WorkingDirectory = $env:MIGA_INSTALL_ROOT
+    $link.IconLocation = Join-Path $env:MIGA_INSTALL_ROOT 'assets\icons\miga.ico'
     $link.Save()
 } elseif ($exists) { Remove-Item -LiteralPath $file }
 """

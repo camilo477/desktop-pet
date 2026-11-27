@@ -5,6 +5,28 @@ and mouse. Miga uses Python, PySide6 and SVG to accompany your activity in a
 transparent desktop window. Linux, Windows and macOS share the same cat, keyboard,
 appearances, gestures and animation code.
 
+## Download for Windows and Mac
+
+Open [Releases](https://github.com/camilo477/desktop-pet/releases) and choose the
+ZIP for your computer under **Assets**. These packages include their runtime:
+you do not need Python, a terminal or a virtual machine.
+
+| Computer | Download | Open Miga |
+| --- | --- | --- |
+| Windows x64 | `Miga-Windows-x64.zip` | Extract all files and double-click `Miga.exe`. Keep the complete `Miga` folder, including `_internal`. |
+| Mac with Apple silicon (M1, M2, M3…) | `Miga-macOS-AppleSilicon.zip` | Unzip, drag `Miga.app` into Applications and open it. |
+| Intel Mac | `Miga-macOS-Intel.zip` | Unzip, drag `Miga.app` into Applications and open it. |
+
+Mac packages require **macOS 15 Sequoia or later**. Check your chip in Apple menu
+→ About This Mac. The **Source code** archives are for building from source;
+choose a Miga ZIP to use the ready-made app. Development builds are not yet
+signed for Windows distribution or notarized by Apple; see the release notes
+for first-launch instructions and optional Mac input permission.
+
+Each version is built and tested on Windows, Intel macOS and Apple silicon
+macOS before its packages are attached to a draft release. Publishing that
+release makes the downloads available to everyone with repository access.
+
 ## Platform status
 
 | Platform | Available integration | Automated and native checks | Hands-on validation remaining |

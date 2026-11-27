@@ -2,6 +2,16 @@
 
 Miga utiliza el mismo gato, pelajes, teclados y animaciones que las versiones de Linux y Windows. Los paquetes de desarrollo son nativos para **Apple Silicon (arm64)** o **Intel (x86_64)**. El mínimo del proyecto es **macOS Sequoia 15**. Los binarios de PySide6/Shiboken 6.11 utilizados declaran ese destino. Las pruebas automáticas se ejecutan en macOS 15. [Requisitos de Qt para macOS](https://doc.qt.io/qt-6.11/macos.html) · [Pruebas por arquitectura](https://github.com/camilo477/desktop-pet/actions/workflows/macos.yml).
 
+## Descargar la aplicación
+
+1. Abre [Releases](https://github.com/camilo477/desktop-pet/releases). En Assets / Recursos, elige **Miga-macOS-AppleSilicon.zip** para chips M1, M2, M3… o **Miga-macOS-Intel.zip** para Intel. Puedes comprobarlo en el menú Apple → **Acerca de este Mac**.
+2. Descomprime el ZIP con doble clic y arrastra **Miga.app** a **Aplicaciones**.
+3. Abre **Miga** desde Finder. No necesitas Python, Terminal ni herramientas de desarrollo.
+
+Estas compilaciones todavía no están notarizadas. Si macOS muestra el aviso de desarrollador no verificado, después de intentar abrir Miga entra en **Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente**. [Guía de Apple](https://support.apple.com/es-es/102445).
+
+Para las reacciones al teclado mientras usas otras aplicaciones, sigue la sección **Permisos y modo local**. Para actualizar, cierra Miga desde su menú y reemplaza la aplicación por la nueva versión. Las preferencias se conservan; macOS puede pedir que vuelvas a conceder el permiso de entrada.
+
 ## Instalar desde el código
 
 1. Descarga el [código de main](https://github.com/camilo477/desktop-pet/archive/refs/heads/main.zip) y descomprime el ZIP. Para compilar necesitas Python nativo 3.11 o posterior con ruedas compatibles (se probó 3.12) y las herramientas de línea de comandos de Apple. Puedes obtener Python en [python.org](https://www.python.org/downloads/macos/).

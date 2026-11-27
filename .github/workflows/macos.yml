@@ -1,5 +1,6 @@
 name: macOS native checks
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       comparison:
@@ -16,8 +17,10 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
+            package: Miga-macOS-AppleSilicon
           - runner: macos-15-intel
             arch: x86_64
+            package: Miga-macOS-Intel
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
@@ -58,12 +61,27 @@ jobs:
           test "$(lipo -archs "$bundle/Contents/MacOS/Miga")" = "$(uname -m)"
           codesign --verify --deep --strict "$bundle"
           echo "Bundle minimum macOS $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$bundle/Contents/Info.plist")"
-      - name: Install, launch, update and remove
+      - name: Package and verify the extracted app
+        env:
+          PACKAGE: ${{ matrix.package }}
         run: |
           bundle="dist/$(uname -m)/Miga.app"
+          ditto -c -k --sequesterRsrc --keepParent "$bundle" "dist/$PACKAGE.zip"
+          ditto -x -k "dist/$PACKAGE.zip" "$RUNNER_TEMP/unpacked"
+          codesign --verify --deep --strict "$RUNNER_TEMP/unpacked/Miga.app"
+          cmp assets/icons/miga.icns "$RUNNER_TEMP/unpacked/Miga.app/Contents/Resources/miga.icns"
+      - name: Install, launch, update and remove
+        run: |
+          bundle="$RUNNER_TEMP/unpacked/Miga.app"
           macos/install.sh --app "$bundle"
           .venv/bin/python tests/macos_launcher.py
           macos/install.sh --app "$bundle"
           macos/uninstall.sh
           test ! -e "$HOME/Applications/Miga.app"
           test ! -e "$HOME/.local/bin/miga"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: dist/${{ matrix.package }}.zip
+          if-no-files-found: error
+          compression-level: 0

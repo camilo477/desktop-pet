@@ -1,0 +1,55 @@
+name: Build downloadable applications
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+  macos:
+    uses: ./.github/workflows/macos.yml
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Miga-*
+          merge-multiple: true
+          path: packages
+      - name: Check all packages and write checksums
+        working-directory: packages
+        run: |
+          test -s Miga-Windows-x64.zip
+          test -s Miga-macOS-Intel.zip
+          test -s Miga-macOS-AppleSilicon.zip
+          sha256sum Miga-Windows-x64.zip Miga-macOS-Intel.zip Miga-macOS-AppleSilicon.zip > SHA256SUMS.txt
+      - name: Prepare a release with all three applications
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/release.json"; then
+            jq -e '.isDraft == true' "$RUNNER_TEMP/release.json"
+            gh release upload "$RELEASE_TAG" packages/* --clobber
+          else
+            options=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" packages/* --verify-tag --draft \
+              --title "Miga $RELEASE_TAG" --notes-file .github/RELEASE_NOTES.md "${options[@]}"
+          fi

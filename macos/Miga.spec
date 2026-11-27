@@ -21,7 +21,8 @@ for binary in Path(coll.name).rglob('*'):
     with binary.open('rb') as stream:
         if stream.read(4) == bytes.fromhex('cffaedfe'):
             minimum = max(minimum, macosx_version_min(str(binary)))
-app = BUNDLE(coll, name='Miga.app', bundle_identifier='io.github.camilo477.miga',
+app = BUNDLE(coll, name='Miga.app', icon=str(root / 'assets/icons/miga.icns'),
+             bundle_identifier='io.github.camilo477.miga',
              info_plist={'CFBundleDisplayName': 'Miga', 'LSUIElement': True,
                          'LSMinimumSystemVersion': '.'.join(map(str, minimum)),
                          'MigaProject': 'camilo477/desktop-pet'})
