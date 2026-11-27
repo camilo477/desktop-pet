@@ -24,8 +24,8 @@ signed for Windows distribution or notarized by Apple; see the release notes
 for first-launch instructions and optional Mac input permission.
 
 Each version is built and tested on Windows, Intel macOS and Apple silicon
-macOS before its packages are attached to a draft release. Publishing that
-release makes the downloads available to everyone with repository access.
+macOS. Once all three pass, their packages are published together in Releases
+and become available to everyone with repository access.
 
 ## Platform status
 

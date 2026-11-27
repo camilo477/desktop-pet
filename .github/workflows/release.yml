@@ -38,7 +38,7 @@ jobs:
           test -s Miga-macOS-Intel.zip
           test -s Miga-macOS-AppleSilicon.zip
           sha256sum Miga-Windows-x64.zip Miga-macOS-Intel.zip Miga-macOS-AppleSilicon.zip > SHA256SUMS.txt
-      - name: Prepare a release with all three applications
+      - name: Publish the verified applications together
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -53,3 +53,4 @@ jobs:
             gh release create "$RELEASE_TAG" packages/* --verify-tag --draft \
               --title "Miga $RELEASE_TAG" --notes-file .github/RELEASE_NOTES.md "${options[@]}"
           fi
+          gh release edit "$RELEASE_TAG" --draft=false
