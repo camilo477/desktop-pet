@@ -682,8 +682,8 @@ class PetWindow(QWidget):
         if self.wayland:
             self.wayland.menu(menu)
         if self.mac_input:
-            from macos_window import permission_menu
-            permission_menu(self, menu)
+            from macos_window import window_menu
+            window_menu(self, menu)
         for label, checked, callback in (
             ("Siempre visible", self.always_on_top, self.set_always_on_top),
             ("Reaccionar a actividad", self.reactions, self.set_reactions),

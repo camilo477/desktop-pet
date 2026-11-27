@@ -214,6 +214,10 @@ The right-click menu offers **Tamaño** (150, 200 or 300
 logical pixels), **Pantalla**, **Teclado**, **Apariencia**, **Siempre visible**, **Reaccionar a actividad**, **Pausar animaciones** / **Reanudar
 animaciones**, and **Salir**. Medium (200 × 200) is the default size.
 
+On macOS, **En todos los escritorios** is enabled by default so Miga accompanies
+you between Mission Control desktops. Toggle it in the right-click menu to keep
+Miga on one desktop. This choice is remembered separately from **Siempre visible**.
+
 **Pantalla** moves Miga to the selected monitor on X11, Windows, macOS and
 KDE Wayland. KDE placement remembers the position within the monitor's usable
 area, handles portrait and offset outputs, keeps resized windows on screen and

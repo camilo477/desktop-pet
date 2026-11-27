@@ -105,10 +105,33 @@ def checks(w):
     assert ns.styleMask() & AppKit.NSWindowStyleMaskNonactivatingPanel
     assert AppKit.NSApp().activationPolicy() == AppKit.NSApplicationActivationPolicyAccessory
     assert w.frame.toImage().pixelColor(0, 0).alpha() == 0
+    spaces = AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+    assert ns.collectionBehavior() & spaces, 'New and upgraded installs should join every desktop'
+    menu = w.build_menu()
+    action = next(a for a in menu.actions() if a.text() == 'En todos los escritorios')
+    assert action.isChecked()
+    action.trigger()
+    assert not ns.collectionBehavior() & spaces
+    assert not w.settings.value('macos/all_spaces', True, type=bool)
     w.set_always_on_top(False)
+    ns = objc.objc_object(c_void_p=int(w.winId())).window()
     assert ns.level() == AppKit.NSNormalWindowLevel
+    assert not ns.collectionBehavior() & spaces, 'Changing window flags must preserve the Spaces choice'
     w.set_always_on_top(True)
+    ns = objc.objc_object(c_void_p=int(w.winId())).window()
     assert ns.level() == AppKit.NSFloatingWindowLevel
+    assert not ns.collectionBehavior() & spaces
+    action.trigger()
+    assert ns.collectionBehavior() & spaces
+    assert w.settings.value('macos/all_spaces', False, type=bool)
+    w.hide()
+    w.show()
+    wait(80)
+    ns = objc.objc_object(c_void_p=int(w.winId())).window()
+    assert ns.collectionBehavior() & spaces
+    assert not ns.canBecomeKeyWindow(), 'Changing Spaces must not make the pet steal keyboard focus'
+    menu.deleteLater()
+    print('PASS: all-desktop default, menu toggle, saved choice and Cocoa window reconfiguration.')
     desktop_checks(w)
 
     # Native permission query above. Model denial/revocation without changing TCC.

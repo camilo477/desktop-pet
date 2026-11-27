@@ -20,6 +20,14 @@ def prepare_panel(widget):
         panel.setHidesOnDeactivate_(False)
         panel.setHasShadow_(False)
         panel.setLevel_(AppKit.NSFloatingWindowLevel if widget.always_on_top else AppKit.NSNormalWindowLevel)
+        behavior = panel.collectionBehavior()
+        if widget.settings.value('macos/all_spaces', True, type=bool):
+            # Cocoa treats these two Spaces policies as mutually exclusive.
+            behavior &= ~AppKit.NSWindowCollectionBehaviorMoveToActiveSpace
+            behavior |= AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+        else:
+            behavior &= ~AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+        panel.setCollectionBehavior_(behavior)
         widget.timer.attach(panel)
 
 
@@ -38,7 +46,7 @@ def permission_notice(widget, status):
     QTimer.singleShot(350, widget, show)
 
 
-def permission_menu(widget, parent):
+def window_menu(widget, parent):
     backend = widget.mac_input
     menu = parent.addMenu('Entrada global en macOS')
     menu.addAction(STATUS[backend.status]).setEnabled(False)
@@ -61,3 +69,13 @@ def permission_menu(widget, parent):
             backend.request_access()
 
     menu.addAction('Información y permisos…', explain)
+
+    def set_all_spaces(checked):
+        widget.settings.setValue('macos/all_spaces', checked)
+        widget.settings.sync()
+        prepare_panel(widget)
+
+    action = parent.addAction('En todos los escritorios')
+    action.setCheckable(True)
+    action.setChecked(widget.settings.value('macos/all_spaces', True, type=bool))
+    action.toggled.connect(set_all_spaces)

@@ -12,6 +12,12 @@ Estas compilaciones todavía no están notarizadas. Si macOS muestra el aviso de
 
 Para las reacciones al teclado mientras usas otras aplicaciones, sigue la sección **Permisos y modo local**. Para actualizar, cierra Miga desde su menú y reemplaza la aplicación por la nueva versión. Las preferencias se conservan; macOS puede pedir que vuelvas a conceder el permiso de entrada.
 
+## Varios escritorios
+
+Miga aparece en todos tus escritorios de Mission Control por defecto. Al cambiar de escritorio, la misma mascota mantiene su posición y sus preferencias.
+
+Puedes cambiarlo desde **clic derecho en Miga → En todos los escritorios**. La elección se guarda para la siguiente apertura. **Siempre visible** controla por separado si Miga queda por encima de otras ventanas. El comportamiento en espacios de aplicaciones a pantalla completa y Stage Manager sigue sujeto a macOS.
+
 ## Instalar desde el código
 
 1. Descarga el [código de main](https://github.com/camilo477/desktop-pet/archive/refs/heads/main.zip) y descomprime el ZIP. Para compilar necesitas Python nativo 3.11 o posterior con ruedas compatibles (se probó 3.12) y las herramientas de línea de comandos de Apple. Puedes obtener Python en [python.org](https://www.python.org/downloads/macos/).
@@ -84,4 +90,4 @@ En los runners ARM64 e Intel se abrió el paquete con LaunchServices, se comprob
 | Escritorio | Prueba Retina, dos monitores de distinta escala, retirada del secundario, Spaces, Mission Control, pantalla completa y Stage Manager. Comprueba nivel de ventana, Dock y selector de aplicaciones. |
 | Actualización y retirada | Cambia tamaño, teclado y pelaje. Cierra, reinstala y abre desde Finder y Terminal. Verifica las preferencias y desinstala. |
 
-Los formatos ANSI/ISO conservan la geometría compartida. Los símbolos de Command, Option y Control se adaptan a macOS. Una fuente personalizada o un método de entrada no identificado utiliza el respaldo estadounidense indicado en el menú. Los atajos de firmware, Globe y los controles multimedia pueden quedar reservados por macOS. La aplicación usa niveles de ventana normales o flotantes y deja la gestión de Spaces y pantalla completa al sistema.
+Los formatos ANSI/ISO conservan la geometría compartida. Los símbolos de Command, Option y Control se adaptan a macOS. Una fuente personalizada o un método de entrada no identificado utiliza el respaldo estadounidense indicado en el menú. Los atajos de firmware, Globe y los controles multimedia pueden quedar reservados por macOS. La aplicación usa niveles de ventana normales o flotantes y el comportamiento nativo de Cocoa para compartir la mascota entre escritorios.

@@ -1,5 +1,9 @@
 Miga se abre como una aplicación de escritorio, sin instalar Python ni usar comandos. Incluye el icono de su cabeza original, negra con ojos dorados.
 
+## Novedad en macOS
+
+Miga te acompaña en todos los escritorios de Mission Control. Está activado por defecto; puedes cambiarlo desde **clic derecho → En todos los escritorios**. La opción se guarda y funciona independientemente de **Siempre visible**.
+
 ## Descargar e instalar
 
 En **Assets / Recursos**, elige el ZIP de tu equipo:
