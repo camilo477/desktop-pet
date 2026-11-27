@@ -72,6 +72,7 @@ class Pose:
     right_key: str | None = None
     pressed: frozenset[str] = frozenset()
     mouse: float = 0.0
+    touchpad: bool = False
     mouse_dx: float = 0.0
     mouse_dy: float = 0.0
     click: float = 0.0
@@ -147,7 +148,9 @@ class Paw:
 class Animations:
     def __init__(self, keyboard=None):
         self.keyboard = keyboard or Keyboard()
-        self.pose = Pose(left_x=self.keyboard.rest[0][0], right_x=self.keyboard.rest[1][0])
+        self.pose = Pose(left_x=self.keyboard.rest[0][0], left_y=self.keyboard.rest[0][1],
+                         right_x=self.keyboard.rest[1][0], right_y=self.keyboard.rest[1][1],
+                         touchpad=self.keyboard.pointer == 'touchpad')
         self.personality = Personality()
         self.tip_phase = 0.0
         self.breath_phase = 0.0
@@ -276,6 +279,9 @@ class Animations:
         self.keyboard = keyboard
         pose = self.pose
         pose.pressed = held
+        pose.touchpad = keyboard.pointer == 'touchpad'
+        if old.pointer != keyboard.pointer:
+            pose.mouse_dx = pose.mouse_dy = 0
         pose.contacts = ()
         pose.contact = pose.left_pressure = pose.right_pressure = 0
         self.mouse_contact = False
@@ -437,7 +443,9 @@ class Animations:
         positions = [pose.mouse_dx, pose.mouse_dy]
         moving = active and (activity.motion_x != 0 or activity.motion_y != 0)
         # Turn screen motion into the cat's peripheral plane on both axes.
-        for axis, (motion, gain, limit) in enumerate(((activity.motion_x, -.11, 12), (activity.motion_y, -.10, 10))):
+        gains = (-.055, -.035) if pose.touchpad else (-.11, -.10)
+        for axis, (motion, gain, limit) in enumerate(zip(
+                (activity.motion_x, activity.motion_y), gains, self.keyboard.pointer_limits)):
             position = positions[axis]
             target, velocity = self.mouse_target[axis], self.mouse_velocity[axis]
             delta = motion * gain if active else 0
@@ -451,7 +459,7 @@ class Animations:
             elif moving:
                 target, velocity = position, 0
             self.mouse_target[axis] = target
-            # Wait for the paw, then move the object and its contact together.
+            # Wait for contact, then slide the mouse or glide over the fixed pad.
             if self.mouse_contact or not active:
                 following, velocity = spring(position, velocity, target, 21, dt)
                 bounded = max(min(position, target), min(max(position, target), following))
@@ -603,7 +611,9 @@ class Animations:
             if key_point and activity.held:
                 look = (gaze[0] * .9 + (self.focus_point[0] - 118) / 70 * .1, gaze[1] * .9 + .07)
         elif scrolling:
-            look = (-.72 + (self.keyboard.mouse_offset + pose.mouse_dx) / 120, .78)
+            look_x = ((self.keyboard.mouse_rest[0] + pose.mouse_dx - 116) / 100 if pose.touchpad
+                      else -.72 + (self.keyboard.mouse_offset + pose.mouse_dx) / 120)
+            look = (look_x, .78)
         elif key_point:
             look = ((self.focus_point[0] - 116) / 72, .95)
         elif playing and self.action_kind == 'look':
@@ -646,8 +656,10 @@ class Animations:
         if mouse_active:
             # Follow the planted paw with the chest; the opposite paw can still type.
             mouse_lean = -15 + (self.keyboard.mouse_offset + pose.mouse_dx) * .55
+            if pose.touchpad:
+                mouse_lean = (self.keyboard.mouse_rest[0] + pose.mouse_dx - 104) * .29
             target_x = mix(mouse_lean, target_x, .18) if key_point else mouse_lean
-            target_y = max(target_y, 10 + pose.mouse_dy * .32)
+            target_y = max(target_y, (7 if pose.touchpad else 10) + pose.mouse_dy * .32)
         target_x += motion.lean - 4.2 * roll
         target_y += motion.drop + 1.5 * nod
         if pose.groom > 0:
@@ -669,6 +681,10 @@ class Animations:
         pose.ear_left += ear_flex
         pose.ear_right += ear_flex
         body = BodyGeometry(pose)
+        pointer_x = self.keyboard.mouse_rest[0] + pose.mouse_dx
+        pointer_y = self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4
+        if pose.touchpad:
+            pointer_y += math.sin(pose.time * 14) * pose.scroll_direction * pose.scroll * .6
         for index, paw in enumerate(self.paws):
             rest = self.keyboard.rest[index]
             side = -1 if index == 0 else 1
@@ -678,7 +694,7 @@ class Animations:
                 paw.aim('lift', (sx - side * 6 + pose.sway_x * .57,
                                  sy + 25 + index * 2 + pose.sway_y * .32))
             elif index == MOUSE_PAW and mouse_active:
-                paw.aim('mouse', (self.keyboard.mouse_rest[0] + pose.mouse_dx, self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4))
+                paw.aim('mouse', (pointer_x, pointer_y))
             elif paw.key in self.keyboard.by_id:
                 point = self.keyboard.by_id[paw.key].contact
                 paw.aim(paw.key, (point[0], point[1] + KEY_TRAVEL), paw.stamp, activity.key_interval, keystroke=True)
@@ -700,7 +716,7 @@ class Animations:
             paw.advance(dt)
             paw.x, paw.y = body.reachable(-1 if index == 0 else 1, (paw.x, paw.y))
             if index == MOUSE_PAW and mouse_active:
-                x, y = self.keyboard.mouse_rest[0] + pose.mouse_dx, self.keyboard.mouse_rest[1] + pose.mouse_dy + pose.click * .4
+                x, y = pointer_x, pointer_y
                 reachable = math.dist(body.reachable(-1, (x, y)), (x, y)) < .01
                 if reachable and (self.mouse_contact or math.hypot(paw.x - x, paw.y - y) < 1.5):
                     self.mouse_contact = True
@@ -721,4 +737,6 @@ class Animations:
         pose.right_x, pose.right_y = self.paws[1].x, self.paws[1].y
         pose.left_key, pose.right_key = self.paws[0].key, self.paws[1].key
         pose.left_pressure, pose.right_pressure = self.paws[0].pressure, self.paws[1].pressure
+        if pose.touchpad and self.mouse_contact:
+            pose.left_pressure = max(pose.left_pressure, pose.click * .8)
         return pose

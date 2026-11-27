@@ -9,7 +9,7 @@ from PySide6.QtGui import QActionGroup, QCursor, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from keyboard_distributions import DISTRIBUTIONS
-from keyboard_layout import FORMATS, STANDARDS, Keyboard
+from keyboard_layout import FORMATS, POINTERS, STANDARDS, Keyboard
 from appearance import Appearance, COATS, EYES, NOSES
 from animations import Animations
 from character import CatArt
@@ -67,7 +67,8 @@ class PetWindow(QWidget):
         self.detected_layout = None
         self.keyboard = Keyboard(self.preference('format', FORMATS, '100'),
                                  self.preference('standard', STANDARDS, 'ISO'),
-                                 self.effective_layout())
+                                 self.effective_layout(),
+                                 self.preference('pointer', POINTERS, 'mouse'))
         self.activity = ActivityMonitor(self.global_input, self.activity_ready.emit, self.keyboard)
         self.activity_ready.connect(self.input_arrived, Qt.ConnectionType.QueuedConnection)
         self.local_gaze = (0.0, 0.0)
@@ -597,10 +598,11 @@ class PetWindow(QWidget):
             return self.manual_layout
         return self.detected_layout or 'us'
 
-    def configure_keyboard(self, *, layout=None, form=None, standard=None):
+    def configure_keyboard(self, *, layout=None, form=None, standard=None, pointer=None):
         form = self.keyboard.form if form is None else form
         standard = self.keyboard.standard if standard is None else standard
-        if form not in FORMATS or standard not in STANDARDS:
+        pointer = self.keyboard.pointer if pointer is None else pointer
+        if form not in FORMATS or standard not in STANDARDS or pointer not in POINTERS:
             return
         if layout is not None:
             if layout != 'auto' and layout not in DISTRIBUTIONS:
@@ -610,14 +612,15 @@ class PetWindow(QWidget):
             if self.layout_mode == 'manual':
                 self.manual_layout = layout
                 self.settings.setValue('keyboard/layout', layout)
-        changed_shape = (form, standard) != (self.keyboard.form, self.keyboard.standard)
+        changed_shape = (form, standard, pointer) != (self.keyboard.form, self.keyboard.standard, self.keyboard.pointer)
         if changed_shape:
-            self.keyboard = Keyboard(form, standard, self.effective_layout())
+            self.keyboard = Keyboard(form, standard, self.effective_layout(), pointer)
             held = self.activity.set_keyboard(self.keyboard)
             self.animations.set_keyboard(self.keyboard, held)
             self.art.set_keyboard(self.keyboard)
             self.settings.setValue('keyboard/format', form)
             self.settings.setValue('keyboard/standard', standard)
+            self.settings.setValue('keyboard/pointer', pointer)
         else:
             self.keyboard.layout = self.effective_layout()
         self.render_frame(force_mask=changed_shape)
@@ -636,6 +639,7 @@ class PetWindow(QWidget):
             ('Distribución', 'layout', layouts, selected),
             ('Formato', 'form', FORMATS, self.keyboard.form),
             ('Estándar físico', 'standard', {s: s for s in STANDARDS}, self.keyboard.standard),
+            ('Mouse / touchpad', 'pointer', POINTERS, self.keyboard.pointer),
         ):
             self.choice_menu(menu, title, options, current,
                              lambda v, k=parameter: self.configure_keyboard(**{k: v}))

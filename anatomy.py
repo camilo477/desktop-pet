@@ -20,7 +20,7 @@ class BodyGeometry:
         self.y = (pose.balance_y + pose.sway_y + pose.relax * 1.2 - pose.breath * .55
                   + pose.pet * 1.1 + contact_dip)
         self.breadth = 1 + pose.breath * .002 + pose.contact * .003
-        self.mouse_reach = pose.mouse
+        self.mouse_reach = 0 if pose.touchpad else pose.mouse
         self.shoulder_roll = pose.motion.shoulders + .19 * pose.sway_x
 
     def map(self, x, y):

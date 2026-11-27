@@ -1,6 +1,10 @@
 Miga se abre como una aplicación de escritorio, sin instalar Python ni usar comandos. Incluye el icono de su cabeza original, negra con ojos dorados.
 
-## Novedad en macOS
+## Nuevo teclado con touchpad
+
+Puedes elegir **clic derecho → Teclado → Mouse / touchpad → Touchpad integrado**. Miga usa una base de laptop: el touchpad permanece fijo mientras la patita se desliza, pulsa y desplaza. La otra patita puede seguir escribiendo. Funciona con todos los formatos y distribuciones de teclado en Windows, macOS y Linux; la elección se conserva al cerrar la app. El mouse original sigue disponible en el mismo menú.
+
+## Varios escritorios en macOS
 
 Miga te acompaña en todos los escritorios de Mission Control. Está activado por defecto; puedes cambiarlo desde **clic derecho → En todos los escritorios**. La opción se guarda y funciona independientemente de **Siempre visible**.
 

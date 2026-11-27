@@ -12,6 +12,8 @@ Estas compilaciones todavía no están notarizadas. Si macOS muestra el aviso de
 
 Para las reacciones al teclado mientras usas otras aplicaciones, sigue la sección **Permisos y modo local**. Para actualizar, cierra Miga desde su menú y reemplaza la aplicación por la nueva versión. Las preferencias se conservan; macOS puede pedir que vuelvas a conceder el permiso de entrada.
 
+Para la variante de laptop, haz clic derecho en Miga → **Teclado → Mouse / touchpad → Touchpad integrado**. El touchpad se queda fijo y Miga desliza su patita, hace clic y desplaza sobre él. La elección se guarda y puedes volver a **Mouse** desde el mismo menú.
+
 ## Varios escritorios
 
 Miga aparece en todos tus escritorios de Mission Control por defecto. Al cambiar de escritorio, la misma mascota mantiene su posición y sus preferencias.

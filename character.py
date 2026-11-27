@@ -39,6 +39,21 @@ def polygon(points):
     return path
 
 
+def rounded_polygon(points, radius):
+    path = QPainterPath()
+    for i, corner in enumerate(points):
+        neighbors = (points[i - 1], points[(i + 1) % len(points)])
+        edges = [QPointF(*(c + (n - c) * radius / math.dist(corner, neighbor)
+                            for c, n in zip(corner, neighbor))) for neighbor in neighbors]
+        if i == 0:
+            path.moveTo(edges[0])
+        else:
+            path.lineTo(edges[0])
+        path.quadTo(QPointF(*corner), edges[1])
+    path.closeSubpath()
+    return path
+
+
 def cubic_points(node):
     data = node.get('d', '')
     values = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', data)]
@@ -141,6 +156,7 @@ class CatArt:
         self.key_paths = {key.identifier: polygon(key.polygon) for key in keyboard.by_id.values()}
         self.board_top = polygon(keyboard.board)
         self.board_path = self.board_top.united(self.board_top.translated(0, 2 * KEYBOARD_SCALE))
+        self.touchpad_path = rounded_polygon(keyboard.touchpad, .8) if keyboard.touchpad else QPainterPath()
         self.keyboard_cache = None
 
     def cache(self, size, pixel_ratio):
@@ -217,6 +233,10 @@ class CatArt:
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#647078'))
         p.save(); p.translate(0, 2 * KEYBOARD_SCALE); p.drawPath(self.board_top); p.restore()
         p.setBrush(QColor('#929ea2')); p.drawPath(self.board_top)
+        if self.model.touchpad:
+            p.setPen(QPen(QColor('#647078'), .65))
+            p.setBrush(QColor('#bac5c6')); p.drawPath(self.touchpad_path)
+            p.setPen(Qt.PenStyle.NoPen)
         self.legends = {}
         font = QFont('sans-serif')
         font.setPixelSize(16)
@@ -484,21 +504,26 @@ class CatArt:
         body = BodyGeometry(pose)
         self.hits.clear()
         self._tail(p, pose, body)
-        mouse_x = self.model.mouse_offset + pose.mouse_dx
-        p.save(); p.translate(mouse_x, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
-        if pose.scroll > .01:
-            p.translate(self.wheel_center); p.rotate(-77)
-            p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
-            p.drawLine(QPointF(step, -.6), QPointF(step, .6))
-        p.restore()
-        self.hits.append(('mouse', self.mouse_path.translated(mouse_x, pose.mouse_dy + pose.click * .4)))
+        if self.model.pointer == 'mouse':
+            mouse_x = self.model.mouse_offset + pose.mouse_dx
+            p.save(); p.translate(mouse_x, pose.mouse_dy + pose.click * .4); self.layer(p, 'mouse')
+            if pose.scroll > .01:
+                p.translate(self.wheel_center); p.rotate(-77)
+                p.setPen(QPen(QColor('#c2cecc'), .7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                step = math.sin(pose.time * 28) * pose.scroll_direction * pose.scroll
+                p.drawLine(QPointF(step, -.6), QPointF(step, .6))
+            p.restore()
+            self.hits.append(('mouse', self.mouse_path.translated(mouse_x, pose.mouse_dy + pose.click * .4)))
         p.save(); p.translate(0, -pose.lift)
         self.layer(p, 'hind-feet'); p.restore()
         self.hits.append(('paw', self.feet_path.translated(0, -pose.lift)))
         self._body(p, body)
         p.drawPixmap(self.keyboard_origin, self.keyboard)
         self.hits.append(('keyboard', self.board_path))
+        if self.model.touchpad:
+            self.hits.append(('touchpad', self.touchpad_path))
+            if pose.click > .01 and pose.mouse > .5:
+                p.fillPath(self.touchpad_path, QColor(68, 86, 94, round(pose.click * 45)))
         pressures = dict(pose.contacts)
         for identifier in pose.pressed | pressures.keys():
             key = self.model.by_id[identifier]

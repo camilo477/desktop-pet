@@ -288,6 +288,11 @@ saved for the next launch. Your computer keeps its own keyboard settings.
 - **Estándar físico** selects ANSI or ISO. ISO has a two-row, stepped Enter,
   a shorter left Shift and one extra key. ANSI has a horizontal Enter and
   places the backslash position above it. All five formats support both.
+- **Mouse / touchpad** switches between the original mouse and **Touchpad integrado**,
+  a laptop-style palm rest with a fixed touchpad. Miga glides a paw across it,
+  taps for clicks and swipes when scrolling; the other paw can still type.
+  Both devices work with every keyboard format and distribution. This changes
+  Miga's drawing, independently of your computer's physical pointing device.
 
 | Format | ANSI | ISO | Dedicated blocks |
 |---|---:|---:|---|
@@ -297,7 +302,8 @@ saved for the next launch. Your computer keeps its own keyboard settings.
 | 65 % | 68 | 69 | Arrows and a navigation column |
 | 60 % | 61 | 62 | Number row, main typing block and modifiers |
 
-New and upgraded installations default to **Automática**, **100 %** and **ISO**.
+New installations default to **Automática**, **100 %**, **ISO** and **Mouse**;
+upgrades preserve your selections.
 Smaller boards keep the same key pitch. The mouse moves slightly closer and the
 paws settle around the selected board. Changing geometry preserves physical
 holds and releases targets for keys that disappear. Pressing an absent key still

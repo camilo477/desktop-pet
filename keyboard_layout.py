@@ -6,6 +6,7 @@ from keyboard_distributions import LEGENDS, TOP_ROW, HOME_ROW, BOTTOM_ROW, NUMBE
 
 FORMATS = {'60': '60 %', '65': '65 %', '75': '75 %', 'tkl': 'TKL', '100': '100 %'}
 STANDARDS = ('ANSI', 'ISO')
+POINTERS = {'mouse': 'Mouse', 'touchpad': 'Touchpad integrado'}
 KEYBOARD_SCALE = .82
 KEY_TRAVEL = .35 * KEYBOARD_SCALE
 MOUSE_ANCHOR = (36.5, 153.5)  # Palm end of the original SVG mouse.
@@ -112,23 +113,40 @@ class Key:
 
 
 class Keyboard:
-    def __init__(self, form='100', standard='ISO', layout='us'):
-        if form not in FORMATS or standard not in STANDARDS or layout not in LEGENDS:
+    def __init__(self, form='100', standard='ISO', layout='us', pointer='mouse'):
+        if (form not in FORMATS or standard not in STANDARDS or layout not in LEGENDS
+                or pointer not in POINTERS):
             raise ValueError('Unsupported keyboard configuration')
         self.form, self.standard, self.layout = form, standard, layout
+        self.pointer = pointer
         positions = placements(form, standard)
         self.columns = max(col + w for _, col, _, w, _ in positions)
         reduction = 23 - self.columns
         self.origin_x = 64 + 1.9 * reduction
+        # Leave a palm rest between the cat and the keys, inside the same canvas.
+        self.origin_y = 169 if pointer == 'touchpad' else 160
         self.mouse_offset = min(3., reduction * .5)
         self.mouse_rest = (MOUSE_ANCHOR[0] + self.mouse_offset, MOUSE_ANCHOR[1])
         self.rest = ((REST[0][0] + .24 * reduction, REST[0][1]),
                      (REST[1][0] - .16 * reduction, REST[1][1]))
+        self.touchpad = ()
+        self.pointer_limits = (12, 10)
+        if pointer == 'touchpad':
+            center = self.columns / 2
+            self.touchpad = tuple(self.project(u, v) for u, v in (
+                (center - 3.8, 5.6), (center + 3.8, 5.6),
+                (center + 3.8, 9.2), (center - 3.8, 9.2)))
+            x, y = self.project(center, 7.4)
+            # The paw's contact is near its toes; center its painted pad on the surface.
+            self.mouse_rest = (x, y + 2.5)
+            self.pointer_limits = (9, 1.5)
+            self.rest = ((x - 23, 158), (x + 23, 158))
         self.center = self.project(self.columns / 2, 2.5)
         split = self.project(7.5, 2.5)[0]
         far = min(line for _, _, line, _, _ in positions) - .3
+        near = 9.6 if pointer == 'touchpad' else 5.25
         self.board = tuple(self.project(u, v) for u, v in (
-            (-.3, far), (self.columns + .3, far), (self.columns + .3, 5.25), (-.3, 5.25)))
+            (-.3, far), (self.columns + .3, far), (self.columns + .3, near), (-.3, near)))
         self.by_id = {}
         for identifier, col, line, w, h in positions:
             l, r, t, b = col + .075, col + w - .075, line + .075, line + h - .075
@@ -151,7 +169,7 @@ class Keyboard:
         # Half-turn about the floor plane: the number pad is on the viewer's left.
         u, v = self.columns - u, 5 - v
         return (self.origin_x + KEYBOARD_SCALE * (u * (5.7 + v * .06) - v * .50),
-                160 + KEYBOARD_SCALE * (v * 4.6 + u * .025))
+                self.origin_y + KEYBOARD_SCALE * (v * 4.6 + u * .025))
 
     def label(self, identifier):
         if sys.platform == 'darwin' and identifier in MAC_LABELS:

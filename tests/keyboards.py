@@ -1,6 +1,7 @@
 """Synthetic physical keyboard, geometry and painted-contact checks."""
 
 import math
+from dataclasses import replace
 import os
 from pathlib import Path
 import sys
@@ -10,7 +11,7 @@ from tempfile import TemporaryDirectory
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QPointF, QSettings, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
@@ -116,6 +117,57 @@ def check_distributions():
         assert math.dist((paw.x, paw.y), (key.contact[0], key.contact[1] + KEY_TRAVEL)) < 1.05
 
 
+def check_touchpad():
+    for form in FORMATS:
+        for standard in STANDARDS:
+            kb = Keyboard(form, standard, pointer='touchpad')
+            art, a = CatArt(kb), Animations(kb)
+            assert art.board_top.contains(art.touchpad_path)
+            assert QRectF(0, 0, 200, 200).contains(art.board_path.boundingRect())
+            assert all(art.board_top.contains(path) and not path.intersects(art.touchpad_path)
+                       for path in art.key_paths.values())
+            # Pointer displacement never moves the laptop's chassis or pad pixels.
+            for size in (150, 200, 300):
+                still = paint(art, a.pose, size)
+                assert still == paint(art, replace(a.pose, mouse_dx=9, mouse_dy=1.5), size)
+                assert 'mouse' not in {name for name, _ in art.hits}
+                assert art.region_at(QPointF(*kb.mouse_rest)) == 'touchpad'
+            for identifier in ('Escape', 'Enter', 'ShiftLeft', 'Backslash', 'CtrlRight'):
+                typing = Animations(kb)
+                for i in range(30):
+                    typing.advance(1/30, i/30, Activity(held=frozenset({identifier})))
+                paw = next(p for p in typing.paws if p.goal == identifier)
+                x, y = kb.by_id[identifier].contact
+                assert paw.landed and math.dist((x, y + KEY_TRAVEL), (paw.x, paw.y)) < 1.05
+            # Follow large movements to each edge, reverse, scroll and click while typing.
+            now = 1
+            for dx, dy in ((40, 40), (-40, -40), (40, -40), (-40, 40)):
+                for i in range(45):
+                    now += 1/30
+                    pose = a.advance(1/30, now, Activity(mouse=now, motion_x=dx, motion_y=dy,
+                                      scroll=now, scroll_y=1, held=frozenset({'Q'})))
+                    if a.mouse_contact:
+                        assert art.touchpad_path.contains(QPointF(pose.left_x, pose.left_y))
+                        assert abs(pose.mouse_dx) <= 9 and abs(pose.mouse_dy) <= 1.5
+                assert a.mouse_contact and a.paws[1].goal == 'Q'
+            before = pose.left_y
+            pose = a.advance(.06, now + .06, Activity(scroll=now + .06, scroll_y=1, click=now))
+            now += .06
+            assert pose.left_y != before and pose.left_pressure > .5
+            assert art.touchpad_path.contains(QPointF(pose.left_x, pose.left_y))
+            clicked = paint(art, pose)
+            assert clicked != paint(art, replace(pose, click=0, left_pressure=0))
+            # Changing the device clears old motion, then contact follows the new surface.
+            for pointer in ('mouse', 'touchpad'):
+                a.set_keyboard(Keyboard(form, standard, pointer=pointer), frozenset())
+                assert pose.mouse_dx == pose.mouse_dy == 0 and not a.mouse_contact
+                for i in range(45):
+                    now += 1/30
+                    pose = a.advance(1/30, now, Activity(mouse=now))
+                assert a.mouse_contact and pose.touchpad == (pointer == 'touchpad')
+                assert math.dist((pose.left_x, pose.left_y), a.keyboard.mouse_rest) < .01
+
+
 def check_absent():
     kb = Keyboard('60', 'ANSI')
     monitor = ActivityMonitor(False, keyboard=kb)
@@ -148,12 +200,13 @@ def check_absent():
 def check_live_menu():
     # Exercise the actual QAction callbacks with isolated preferences and synthetic input.
     config = QSettings()
-    for key in ('format', 'standard', 'layout_mode', 'layout'):
+    for key in ('format', 'standard', 'layout_mode', 'layout', 'pointer'):
         config.setValue(f'keyboard/{key}', 'invalid')
     w = PetWindow()
     w.show()
     origin, size = w.pos(), w.size()
     assert (w.layout_mode, w.keyboard.form, w.keyboard.standard) == ('auto', '100', 'ISO')
+    assert w.keyboard.pointer == 'mouse'
     def choose(submenu, label):
         menu = w.build_menu()
         keyboards = next(a.menu() for a in menu.actions() if a.text() == 'Teclado')
@@ -195,8 +248,14 @@ def check_live_menu():
     choose('Estándar físico', 'ANSI')
     w.tick()
     assert a.paws[0].goal == 'mouse' and a.paws[1].goal == 'Q'
+    before_mask = w.last_mask
+    choose('Mouse / touchpad', 'Touchpad integrado')
+    assert w.keyboard.pointer == 'touchpad' and w.last_mask != before_mask
+    assert a.pose.pressed == {'Q'} and a.pose.touchpad
+    w.tick()
+    assert a.paws[0].goal == 'mouse' and a.paws[1].goal == 'Q'
     choose('Formato', '100 %')
-    assert a.pose.pressed == {'Q', 'Numpad1'}
+    assert a.pose.pressed == {'Q', 'Numpad1'} and w.keyboard.pointer == 'touchpad'
     w.activity.key_up('Numpad1')
     w.activity.key_up('Q')
     time.sleep(.23)
@@ -210,11 +269,15 @@ def check_live_menu():
     before = a.time
     choose('Formato', '65 %')
     choose('Estándar físico', 'ISO')
+    choose('Mouse / touchpad', 'Mouse')
+    assert not a.pose.touchpad
+    choose('Mouse / touchpad', 'Touchpad integrado')
     assert a.time == before and not w.timer.isActive()
     assert w.pos() == origin and w.size() == size and w.art.model is a.keyboard is w.activity.keyboard
     w.shutdown()
     restored = PetWindow()
     assert (restored.keyboard.form, restored.keyboard.standard, restored.keyboard.layout) == ('65', 'ISO', 'dvorak')
+    assert restored.keyboard.pointer == 'touchpad' and restored.animations.pose.touchpad
     assert restored.paused and not restored.reactions and restored.pos() == origin
     restored.shutdown()
 
@@ -256,7 +319,8 @@ if __name__ == '__main__':
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, prefs)
         check_geometry()
         check_distributions()
+        check_touchpad()
         check_absent()
         check_priority()
         check_live_menu()
-    print('PASS: ten geometries, eight layouts, painted contacts, live menu, held keys, sleep, cadence and persistence.')
+    print('PASS: twenty geometries, eight layouts, mouse/touchpad contact, clicks, scroll, live menu, held keys and persistence.')
