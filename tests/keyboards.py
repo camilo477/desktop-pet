@@ -16,6 +16,7 @@ from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from activity import Activity, ActivityMonitor, KeyHint
+from appearance import Appearance
 from animations import Animations
 from character import CatArt
 from keyboard_distributions import DISTRIBUTIONS, detected_layout
@@ -166,6 +167,23 @@ def check_touchpad():
                     pose = a.advance(1/30, now, Activity(mouse=now))
                 assert a.mouse_contact and pose.touchpad == (pointer == 'touchpad')
                 assert math.dist((pose.left_x, pose.left_y), a.keyboard.mouse_rest) < .01
+
+
+def check_crossed_paws():
+    kb = Keyboard(pointer='touchpad')
+    art = CatArt(kb, Appearance('tuxedo'))  # Light toes and dark forelegs.
+    animation = Animations(kb)
+    for key, crossed in (('Backspace', True), ('Q', False)):
+        for i in range(45):
+            now = animation.time + 1 / 30
+            pose = animation.advance(1 / 30, now, Activity(mouse=now, held=frozenset({key})))
+        assert animation.mouse_contact and pose.right_key == key
+        frame = paint(art, pose, 600)
+        pixel = frame.pixelColor(round(pose.left_x * 3), round((pose.left_y - 3.5) * 3))
+        if crossed:
+            assert pixel == art.foreleg, 'Typing foreleg must cover touchpad toes at the crossing'
+        else:
+            assert pixel.lightness() > 180, 'Touchpad toes must stay visible beside the typing foreleg'
 
 
 def check_absent():
@@ -320,6 +338,7 @@ if __name__ == '__main__':
         check_geometry()
         check_distributions()
         check_touchpad()
+        check_crossed_paws()
         check_absent()
         check_priority()
         check_live_menu()

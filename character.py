@@ -499,6 +499,21 @@ class CatArt:
             p.strokePath(self.z_path, QPen(QColor('#f0f2ed'), 1.4))
             p.fillPath(self.z_path, QColor('#526168')); p.restore()
 
+    def _paw(self, p, pose, side, body):
+        x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
+        reach = body.mouse_reach if side < 0 else 0
+        transform = QTransform.fromTranslate(x, y)
+        transform.rotate(-14 * reach)
+        pressure = pose.left_pressure if side < 0 else pose.right_pressure
+        transform.scale(1 + pressure * .035, 1 - pressure * .10)
+        if pose.motion.content and not pose.pressed and pose.mouse < .01:
+            planted = pose.motion.content * smoothstep((y - 153) / 4)
+            transform.scale(1 + .16 * planted, 1 - .13 * planted)
+        transform.translate(-reach, mix(-3.5, 0, reach))
+        self.hits.append(('paw', transform.map(self.paw_path)))
+        p.save(); p.setTransform(transform, True)
+        self.layer(p, 'paw' if side < 0 else 'paw-right'); p.restore()
+
     def draw(self, p, pose):
         p.save(); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         body = BodyGeometry(pose)
@@ -529,25 +544,18 @@ class CatArt:
             key = self.model.by_id[identifier]
             self.draw_key(p, key, identifier in pose.pressed, pressures.get(identifier, 0))
         washing_face = pose.action == 'wash' and pose.groom > .01
+        # The typing foreleg crosses in front of the paw planted on the touchpad.
+        pad_paw_behind = pose.touchpad and pose.mouse > .01 and not washing_face
         if not washing_face:
             self._arm(p, pose, -1, body)
+        if pad_paw_behind:
+            self._paw(p, pose, -1, body)
         self._arm(p, pose, 1, body)
         self._head(p, pose, body)
         self.hits.extend(zip(('ear-left', 'ear-right', 'head'), self.head_hit_paths))
         if washing_face:
             self._arm(p, pose, -1, body)
-        for side in (-1, 1):
-            x, y = (pose.left_x, pose.left_y) if side < 0 else (pose.right_x, pose.right_y)
-            reach = body.mouse_reach if side < 0 else 0
-            transform = QTransform.fromTranslate(x, y)
-            transform.rotate(-14 * reach)
-            pressure = pose.left_pressure if side < 0 else pose.right_pressure
-            transform.scale(1 + pressure * .035, 1 - pressure * .10)
-            if pose.motion.content and not pose.pressed and pose.mouse < .01:
-                planted = pose.motion.content * smoothstep((y - 153) / 4)
-                transform.scale(1 + .16 * planted, 1 - .13 * planted)
-            transform.translate(-reach, mix(-3.5, 0, reach))
-            self.hits.append(('paw', transform.map(self.paw_path)))
-            p.save(); p.setTransform(transform, True)
-            self.layer(p, 'paw' if side < 0 else 'paw-right'); p.restore()
+        if not pad_paw_behind:
+            self._paw(p, pose, -1, body)
+        self._paw(p, pose, 1, body)
         self._zzz(p, pose); p.restore()
